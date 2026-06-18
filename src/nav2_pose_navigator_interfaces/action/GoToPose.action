@@ -1,0 +1,12 @@
+# GoToPose — navigate the robot to a target pose through Nav2
+#
+# Client sends target_pose (PoseStamped in map frame).
+# Server forwards it to Nav2 NavigateToPose, monitors progress,
+# and publishes distance_remaining feedback.
+
+geometry_msgs/PoseStamped target_pose
+---
+bool success
+string message
+---
+float32 distance_remaining
