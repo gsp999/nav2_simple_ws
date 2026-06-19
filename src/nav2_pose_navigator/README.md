@@ -4,9 +4,22 @@
 
 ## 坐标系
 
+### 核心结论：`map` 坐标系 = Odin 的坐标系
+
+`odom_to_tf_node.py` 发布以下 TF 链：
+
+```
+map ──(identity, 无平移无旋转)──▶ nav_map ──(Odin 上报的位姿, 原样照抄)──▶ base_link
+```
+
+- `map → nav_map` 是静态 identity（全零），**`map` 和 `nav_map` 完全重合**
+- `nav_map → base_link` 直接把 Odin 上报的 x/y/z 原样写入 transform
+
+**所以 `map` 坐标系本质上就是 Odin 的坐标系**——Odin 说机器人在哪，机器人在 map 系就在哪。
+
 ### 场地世界坐标系
 
-**12m × 12m** 全场，X 轴向下（0→12），Y 轴向右（-6→+6）。Y=0 中线分割红蓝。
+**12m × 12m** 全场，X 轴向下（0→12），Y 轴向右（-6→+6）。Y=0 中线分割红蓝。这个坐标系需要和 Odin 的坐标系对齐（见下方"对齐 Odin 坐标系"）。
 
 ```
                           ◀── Y 负半轴（红方）──│── Y 正半轴（蓝方）──▶
@@ -72,34 +85,81 @@ X=12 ┤  场 地 边 界 墙 (底)             │     │     │  场 地 边
 | `field_red.yaml` | `[0, -6, 0]` | X∈[0,12], Y∈[-6,0] | 240×120 | 0.05 m/px |
 | `field_blue.yaml` | `[0, 0, 0]` | X∈[0,12], Y∈[0,6] | 240×120 | 0.05 m/px |
 
-### 地图原点与 PGM 像素映射
+### 地图原点、分辨率、PGM 尺寸
 
-地图 YAML 中的 `origin` 是 **PGM 图像左下角** 在世界坐标系中的位置（见上表）。
+#### YAML `origin` — PGM 左下角在 Odin 坐标系中的位置
 
-**PGM 像素 → 世界坐标的映射关系**（`generate_maps.py` 中实现）：（`generate_maps.py` 中实现）：
+`origin: [ox, oy, yaw]` 就是告诉 Nav2：**PGM 图片的左下角放在 Odin 坐标系的 (ox, oy) 位置**。
+
+```yaml
+# field_red.yaml
+origin: [0, -6, 0.0]   # PGM 左下角在 Odin 系的 (0, -6)
+                        # PGM 高 6m，所以覆盖 Odin Y ∈ [-6, 0]
+
+# field_blue.yaml
+origin: [0, 0, 0.0]    # PGM 左下角在 Odin 系的 (0, 0)
+                        # 覆盖 Odin Y ∈ [0, 6]
+```
+
+移动 origin 就是让地图在 Odin 的世界里平移。**只需要改这一个值**——PGM 内容和 generate_maps.py 里的 `oy` 变量不需要同步修改（`oy` 只影响障碍物画在 PGM 图片的哪个像素上，不影响 PGM 最终摆放在世界的位置）。
+
+#### `resolution` — 每个像素代表多少米
+
+`resolution: 0.05` 即 5cm/px。配合 PGM 尺寸：
 
 ```
-col = X / 0.05                    # 列：世界 X → 像素列
-row = 119 - (Y - origin_y) / 0.05 # 行：世界 Y → 像素行（PGM 第0行=图像顶部=世界Y最大值）
+X: 240 px × 0.05 m/px = 12 m
+Y: 120 px × 0.05 m/px = 6 m
 ```
 
-以红方为例（origin_y = -6）：
+resolution 决定地图的物理大小，一般不需要改。除非你换了分辨率不同的地图图片。
+
+#### PGM 尺寸 (240×120) 在哪里设定
+
+| 位置 | 说明 |
+|------|------|
+| **PGM 二进制文件头** | 每个 `.pgm` 文件头部写了自己的宽高 (`240 120`) |
+| **[generate_maps.py](../../generate_maps.py) 第 18 行** | `W, H = 240, 120` — 生成脚本的常量，控制产出 PGM 的尺寸 |
+
+YAML 里不需要写尺寸——Nav2 读 PGM 时从文件头自动获取。
+
+#### PGM 像素 → 世界坐标的映射
+
+```
+col = (X - origin_x) / 0.05              # 世界 → 像素列
+row = (ymax - Y) / 0.05                  # 世界 → 像素行
+     = (origin_y + 120*0.05 - Y) / 0.05   # ymax = origin_y + 6
+```
+
+以红方为例（origin_y = -6, ymax = 0）：
 - 世界 Y = -6 → row = 119（PGM 最底部）
 - 世界 Y =  0 → row =   0（PGM 最顶部，中线）
 
 ### TF 坐标变换链
 
 ```
-map                         ← 你发目标时用的 frame_id（世界坐标系）
- │  静态 identity TF        ← odom_to_tf_node 发布（map 和 nav_map 完全重合）
- ▼
-nav_map                     ← Nav2 内部使用的坐标系
- │  动态 TF（来自 Odin）     ← odom_to_tf_node 订阅 /odin1/relocation 后发布
- ▼
-base_link                   ← 机器人自身坐标系
+Odin 的坐标系
+     │
+     │  PGM 地图通过 YAML origin 摆放在这个坐标系中
+     │  你发的目标也是 frame_id="map"，即这个坐标系
+     ▼
+map ──(static identity)──▶ nav_map ──(Odin 上报位姿)──▶ base_link
 ```
 
-> **为什么分 map 和 nav_map？** Nav2 写死使用 `nav_map` 作为 global_frame，但用户发目标用 `map` 更直观。identity TF 保证两者等价，ROS 自动处理转换。你不需要关心这个区别——目标点 frame_id 写 `"map"` 即可。
+> **为什么分 map 和 nav_map？** Nav2 写死使用 `nav_map` 作为 global_frame。identity TF 保证 map = nav_map，ROS 自动处理。你不需要关心这个区别——目标点 frame_id 写 `"map"` 即可。
+
+### 对齐 Odin 坐标系
+
+如果 Odin 的坐标系和当前 YAML origin 不匹配，**只需要改 `origin` 的值**。
+
+**举例**：Odin 以场地中心为 (0,0)，红方区域左下角在 Odin 系中是 (0, -3) 而不是 (0, -6)：
+
+```yaml
+# field_red.yaml — 只改这一个值
+origin: [0, -3, 0.0]   # 原值: [0, -6, 0.0]
+```
+
+**不需要改** `generate_maps.py`、`odom_to_tf_node.py`、`nav2_params.yaml`、launch 文件——origin 是唯一决定地图在世界上位置的地方。
 
 ---
 
@@ -153,6 +213,45 @@ goal.target_pose.pose.orientation.z = math.sin(yaw / 2.0)
 goal.target_pose.pose.orientation.w = math.cos(yaw / 2.0)
 client.send_goal_async(goal)
 ```
+
+---
+
+## 交互式地图可视化工具
+
+`map_viz_tool.py` 是一个离线路径规划预览工具，不需要 ROS 运行即可使用。
+
+### 启动
+
+```bash
+# 红方
+python3 src/nav2_pose_navigator/nav2_pose_navigator/map_viz_tool.py --team red
+
+# 蓝方
+python3 src/nav2_pose_navigator/nav2_pose_navigator/map_viz_tool.py --team blue
+
+# 自定义地图
+python3 src/nav2_pose_navigator/nav2_pose_navigator/map_viz_tool.py --map /path/to/custom.yaml
+
+# 调整机器人半径（默认 0.20m）
+python3 src/nav2_pose_navigator/nav2_pose_navigator/map_viz_tool.py --team red --radius 0.35
+```
+
+### 功能
+
+| 功能 | 操作 |
+|------|------|
+| 点击设起点/目标 | 点「设起点」/「设目标」按钮后点击地图 |
+| 手动输入坐标 | 在「目标X / 目标Y / Yaw」文本框输入后回车 |
+| 路径规划 | 点击「规划路径」，A* 算法，自动膨胀障碍物 |
+| 切换地图 | 单选按钮切换红方/蓝方/自定义 |
+| 预览原点 | 修改「原点X / 原点Y」→ 点「应用原点」，不修改文件 |
+| 保存路径 | 点击「保存路径」，导出路径点到 TXT 文件 |
+
+### 路径规划的障碍物膨胀
+
+A* 规划时会将障碍物膨胀 `robot_radius`（默认 0.20m = 4px），确保路径与障碍物保持安全距离。和 Nav2 的 `inflation_layer` 概念一致。
+
+> **注意**：GUI 显示的是 **Odin 坐标系**（即 `map` 系），和发 `/go_to_pose` 目标时用的坐标系一致。
 
 ---
 
@@ -254,62 +353,37 @@ client.send_goal_async(goal)
 
 ## 修改指南
 
-### 改地图原点
+### 改地图原点（对齐 Odin 坐标系）
 
-如果你需要移动世界坐标系原点（例如把红方原点从 `[0, -6, 0]` 改到其他位置），需要改 **3 个地方**：
+如果 Odin 的坐标系和你当前的 YAML origin 不匹配，**只需要改 YAML 文件里的 `origin` 一行**。
 
-#### 1. 地图 YAML — `origin` 字段
+#### 1. 改地图 YAML — `origin` 字段
 
 文件：`maps/field_red.yaml` / `maps/field_blue.yaml`
 
 ```yaml
-# 红方当前：原点在 (0, -6)，即 PGM 左下角对应世界 Y=-6
+# 红方当前：origin=[0,-6,0]，即 PGM 左下角在 Odin 系的 (0,-6)
 origin: [0.0, -6.0, 0.0]
 
-# 例如改成红方原点在 (0, 0)（和蓝方一致）：
-origin: [0.0, 0.0, 0.0]
+# 例如 Odin 以场地中心为原点，红方左下角在 (0,-3)：
+origin: [0.0, -3.0, 0.0]
 ```
 
-> `origin: [ox, oy, yaw]` — ox/oy 是 PGM 左下角像素在世界坐标系中的位置。yaw 是地图旋转角（弧度），一般保持 0。
+> `origin: [ox, oy, yaw]` — ox/oy 是 PGM 左下角像素在 **Odin 坐标系中** 的位置。yaw 是地图旋转角（弧度），一般保持 0。
 
-#### 2. 地图生成脚本 — `origin_y` 变量
+#### 2. 不需要改的地方
 
-文件：[generate_maps.py](../../generate_maps.py) 中的 `generate_red()` / `generate_blue()`
+- **`generate_maps.py`** 中的 `oy` 变量——它只影响障碍物画在 PGM 图片的哪个像素上，不影响 PGM 在世界中的位置。除非障碍物本身需要移动，否则不用改
+- **`odom_to_tf_node.py`** — 发布的是 identity TF，不涉及 offset
+- **`nav2_params.yaml`** — 不引用 origin
+- **`goto_pose_server.py`** — 只转发 PoseStamped，不关心原点
+- **`bringup.launch.py`** — YAML 路径来自 team 参数，不硬编码原点
 
-```python
-def generate_red():
-    oy = -6.0   # ← 改这个值，必须和 YAML origin[1] 一致
-    ...
-
-def generate_blue():
-    oy = 0.0    # ← 同上
-    ...
-```
-
-改完后重新生成：
-```bash
-python generate_maps.py
-```
-
-#### 3. 坡面 Y 范围 — ramp_zone_manager
+#### 3. 坡面 Y 范围（只有原点改了影响坡面坐标时才需要）
 
 文件：[nav2_pose_navigator/ramp_zone_manager.py](nav2_pose_navigator/ramp_zone_manager.py) 第 41-44 行
 
-```python
-if self.team == "blue":
-    self.ramp_y_min, self.ramp_y_max = 4.5, 6.0
-else:
-    self.ramp_y_min, self.ramp_y_max = -6.0, -4.5
-```
-
-> 坡面 Y 坐标是世界坐标。如果原点变了但坡面实际位置没变，这里不用改。如果原点移动意味着世界坐标变了，则同步更新。
-
-#### 不需要改的地方
-
-- **`odom_to_tf_node.py`** — 发布的是 `map → nav_map` identity TF，和原点无关
-- **`nav2_params.yaml`** — 使用 `nav_map` 作为 global_frame，不直接引用原点
-- **`goto_pose_server.py`** — 只转发 PoseStamped，不关心原点
-- **`bringup.launch.py`** — 不硬编码原点
+坡面坐标是世界坐标（Odin 系）。如果你改了 origin 但坡面在 Odin 系里位置不变，**不用改这里**。只有当坡面的绝对位置也变了才需要更新。
 
 ### 改地图障碍物
 
@@ -441,7 +515,8 @@ nav2_pose_navigator/
 │   ├── goto_pose_server.py        # Action 服务器（核心）
 │   ├── ramp_zone_manager.py       # 坡面管理（悬挂 + 限速 + 锁朝向）
 │   ├── odom_to_tf_node.py         # TF 广播（坐标系桥接）
-│   └── cmd_vel_bridge.py          # 速度格式翻译
+│   ├── cmd_vel_bridge.py          # 速度格式翻译
+│   └── map_viz_tool.py            # 交互式地图可视化 + 路径规划
 ├── config/
 │   └── nav2_params.yaml           # Nav2 完整参数
 ├── launch/
