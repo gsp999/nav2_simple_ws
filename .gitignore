@@ -1,0 +1,19 @@
+# colcon build artifacts
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+*.egg
+
+# IDE
+.vscode/
+.idea/
+
+# Environment
+.env
+.env.*
