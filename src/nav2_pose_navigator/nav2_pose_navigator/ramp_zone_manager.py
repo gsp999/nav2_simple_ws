@@ -1,4 +1,20 @@
-"""监测位置，坡面升悬挂+最低速，yaw 覆盖控制"""
+"""监测位置，坡面升悬挂+锁yaw=0+最低速，yaw 覆盖控制
+
+进入坡面时自动:
+  1. 升起悬挂 (suspension_ramp)
+  2. 锁 yaw=0 (正面朝坡，+X 方向)，P 控制器覆盖 wz
+  3. 强制最低速 (min_ramp_speed)
+  4. 减速模式 (/targetstate=-1)
+
+出坡面时恢复:
+  1. 降悬挂 (suspension_flat)
+  2. 释放 yaw 锁 → Nav2 恢复旋转控制（到目标朝向）
+  3. 减速模式 (/targetstate=-1)
+
+外部 yaw 覆盖:
+  - /desired_yaw (Float32): 设置期望朝向(rad)，发 999.0 解除
+  - 外部覆盖优先级高于坡面自动锁（可在坡面中覆盖）
+"""
 
 import math
 import rclpy
@@ -89,15 +105,21 @@ class RampZoneManager(Node):
             self.ramp_y_min <= self.current_y <= self.ramp_y_max
         )
         if self.in_ramp and not was_in_ramp:
-            self.get_logger().info("Enter ramp -> raise suspension")
+            self.get_logger().info("Enter ramp -> raise suspension + lock yaw=0 (face ramp)")
             h = self.suspension_ramp
             self.suspension_pub.publish(Float32MultiArray(data=[h, h, h, h]))
             self.target_state_pub.publish(Int32(data=-1))
+            # Lock yaw to 0 (straight up +X), face the ramp head-on
+            self.desired_yaw = 0.0
+            self.get_logger().info("Yaw locked to 0° (face ramp)")
         elif not self.in_ramp and was_in_ramp:
-            self.get_logger().info("Exit ramp -> lower suspension")
+            self.get_logger().info("Exit ramp -> lower suspension + unlock yaw")
             h = self.suspension_flat
             self.suspension_pub.publish(Float32MultiArray(data=[h, h, h, h]))
             self.target_state_pub.publish(Int32(data=-1))
+            # Release yaw — Nav2 resumes orientation control (rotate to goal)
+            self.desired_yaw = None
+            self.get_logger().info("Yaw unlocked (Nav2 resumes rotation)")
 
     def cmd_cb(self, msg: Twist):
         out = Twist()

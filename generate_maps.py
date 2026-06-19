@@ -8,7 +8,10 @@ Blue obstacles (Y positive half, origin [0, 0, 0]):
   梅林区:      X∈[3.2, 8.0], Y∈[1.2, 4.8]
   竞技区高台:   X=9.45, Y∈[0.0, 4.5]
 
-斜坡 coords (ramp_zone only, NOT in PGM):
+斜坡边界墙 (ramp edge wall, IN PGM):
+  Red:  X∈[9.3, 10.8], Y=-4.5
+  Blue: X∈[9.3, 10.8], Y=4.5
+斜坡区域 (ramp_zone only, NOT in PGM):
   Red:  X∈[9.3, 10.8], Y∈[-6.0, -4.5]
   Blue: X∈[9.3, 10.8], Y∈[4.5, 6.0]
 """
@@ -64,6 +67,9 @@ def generate_blue():
     # 竞技区高台 wall
     rect(img, 9.45, 9.50, 0.0, 4.5, oy)
 
+    # 斜坡边界墙  Y=4.5, X∈[9.3, 10.8]
+    vline(img, 4.5, 9.3, 10.8, oy, 30)
+
     return img
 
 def generate_red():
@@ -83,6 +89,9 @@ def generate_red():
 
     # 竞技区高台 wall
     rect(img, 9.45, 9.50, -4.5, 0.0, oy)
+
+    # 斜坡边界墙  Y=-4.5, X∈[9.3, 10.8]
+    vline(img, -4.5, 9.3, 10.8, oy, 30)
 
     return img
 

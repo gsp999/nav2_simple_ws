@@ -19,6 +19,7 @@ import argparse
 import heapq
 import os
 import sys
+import threading
 import time
 from collections import deque
 from pathlib import Path
@@ -301,8 +302,22 @@ class MapVisualizer:
         self.goal_wx = None
         self.goal_wy = None
         self.goal_yaw = 0.0
-        self.path_xy = None       # list of (wx, wy)
+        self.path_xy = None       # A* path: list of (wx, wy)
         self.custom_map_path = ""
+
+        # Online-mode state
+        self._ros_node = None
+        self._ros_thread = None
+        self._ros_running = False
+        self._nav2_path = None        # Nav2 /plan path: list of (wx, wy)
+        self._global_costmap = None   # numpy array (H×W) of OccupancyGrid data
+        self._costmap_info = None     # dict with origin, resolution, width, height
+        self._show_nav2 = True        # toggle: show Nav2 path vs A*
+        self._show_costmap = True     # toggle: show global costmap overlay
+        self._feedback_distance = None  # last distance feedback from action
+
+        if online:
+            self._init_ros()
 
         # Build UI
         self._build_figure()
@@ -399,16 +414,19 @@ class MapVisualizer:
         self._tb_yaw.on_submit(self._on_coord_input)
 
         # ── Row 3: action buttons ──
-        row3_y, row3_h = 0.008, 0.048
+        row3_y, row3_h = 0.005, 0.055
 
         btn_specs = [
-            (0.04, 0.085, "[S] 设起点", self._on_btn_start, "#a8e6cf"),
-            (0.13, 0.085, "[G] 设目标", self._on_btn_goal, "#ffd3b6"),
-            (0.22, 0.085, "[P] 规划路径", self._on_btn_plan, "#dcedc1"),
-            (0.31, 0.085, "[X] 清除", self._on_btn_clear, "#eeeeee"),
-            (0.40, 0.085, "[>>] 发送Nav2", self._on_send_nav2, "#74b9ff"),
-            (0.49, 0.085, "[Save] 保存路径", self._on_save_path, "#dfe6e9"),
-            (0.58, 0.085, "[Q] 退出", self._on_btn_quit, "#ff8b94"),
+            (0.04, 0.075, "[S] 设起点", self._on_btn_start, "#a8e6cf"),
+            (0.12, 0.075, "[G] 设目标", self._on_btn_goal, "#ffd3b6"),
+            (0.20, 0.075, "[P] A*规划", self._on_btn_plan, "#dcedc1"),
+            (0.28, 0.075, "[N] Nav2规划", self._on_fetch_nav2_plan, "#81ecec"),
+            (0.36, 0.075, "[X] 清除", self._on_btn_clear, "#eeeeee"),
+            (0.44, 0.075, "[>>] 发送Nav2", self._on_send_nav2, "#74b9ff"),
+            (0.52, 0.06, "Costmap", self._on_toggle_costmap, "#ffeaa7"),
+            (0.585, 0.06, "A*/Nav2", self._on_toggle_nav2, "#dfe6e9"),
+            (0.65, 0.06, "[Save]", self._on_save_path, "#dfe6e9"),
+            (0.715, 0.06, "[Q] 退出", self._on_btn_quit, "#ff8b94"),
         ]
 
         self._action_buttons = []
@@ -637,15 +655,41 @@ class MapVisualizer:
             self._update_status("⚠ 半径格式错误")
 
     def _on_send_nav2(self, event):
-        """Send goal to Nav2 via /go_to_pose Action (online mode)."""
+        """Send goal to Nav2 via /go_to_pose Action."""
         if self.goal_wx is None or self.goal_wy is None:
             self._update_status("⚠ 请先设置目标点!")
             return
-        self._update_status("正在连接 Nav2… (需要 ROS 2 运行)")
+        if not self.online:
+            self._update_status("⚠ 请用 --online 启动以连接 ROS 2")
+            return
         try:
             self._ros_send_goal()
         except Exception as e:
             self._update_status(f"✗ ROS 发送失败: {e}")
+
+    def _on_fetch_nav2_plan(self, event):
+        """Button handler: request Nav2 plan via ComputePathToPose action."""
+        if not self.online:
+            self._update_status("⚠ 请用 --online 启动以连接 ROS 2")
+            return
+        try:
+            self._fetch_nav2_plan()
+        except Exception as e:
+            self._update_status(f"✗ 获取 Nav2 路径失败: {e}")
+
+    def _on_toggle_nav2(self, event):
+        """Toggle between A* and Nav2 path display."""
+        self._show_nav2 = not self._show_nav2
+        state = "Nav2 路径" if self._show_nav2 else "A* 路径"
+        self._update_status(f"已切换: 显示 {state}")
+        self._update_display()
+
+    def _on_toggle_costmap(self, event):
+        """Toggle global costmap overlay."""
+        self._show_costmap = not self._show_costmap
+        state = "显示" if self._show_costmap else "隐藏"
+        self._update_status(f"已切换: {state} costmap 叠加层")
+        self._update_display()
 
     def _on_save_path(self, event):
         """Save current path to a text file."""
@@ -665,8 +709,42 @@ class MapVisualizer:
 
     # ── Display update ─────────────────────────────────────────────────
     def _update_display(self):
-        """Redraw the map with all overlays."""
+        """Redraw the map with all overlays (PGM + A*/Nav2 paths + costmap)."""
         self._draw_map_base()
+
+        # ── Global costmap overlay ──
+        if self.online and self._show_costmap and self._global_costmap is not None:
+            self._draw_costmap_overlay()
+
+        # ── Nav2 path (cyan, from /plan or ComputePathToPose) ──
+        if self._show_nav2 and self._nav2_path:
+            npx, npy = zip(*self._nav2_path)
+            self.ax_map.plot(npx, npy, "-", color="cyan", linewidth=2.5,
+                             alpha=0.9, zorder=7, label="Nav2 路径")
+            if len(npx) > 2:
+                step = max(1, len(npx) // 15)
+                self.ax_map.scatter(npx[::step], npy[::step], s=10,
+                                    color="cyan", alpha=0.5, zorder=7)
+            nav2_len = self._path_length(self._nav2_path)
+            mid = len(self._nav2_path) // 2
+            self.ax_map.annotate(
+                f"Nav2: {nav2_len:.2f}m", self._nav2_path[mid],
+                fontsize=7, color="cyan", fontweight="bold",
+                textcoords="offset points", xytext=(0, -10))
+
+        # ── A* path (blue) ──
+        if self._show_nav2 and self._nav2_path:
+            # If showing Nav2, draw A* fainter for comparison
+            astyle = dict(color="blue", linewidth=1.2, alpha=0.4, zorder=5, label="A* (参考)")
+        else:
+            astyle = dict(color="blue", linewidth=2.0, alpha=0.8, zorder=5, label="A* 路径")
+        if self.path_xy:
+            px, py = zip(*self.path_xy)
+            self.ax_map.plot(px, py, "-", **astyle)
+            if len(px) > 2 and not (self._show_nav2 and self._nav2_path):
+                step = max(1, len(px) // 20)
+                self.ax_map.scatter(px[::step], py[::step], s=8, color="blue",
+                                    alpha=0.5, zorder=6)
 
         # Start marker (green circle)
         self.ax_map.plot(self.start_wx, self.start_wy, "o", color="green",
@@ -695,21 +773,47 @@ class MapVisualizer:
                 textcoords="offset points", xytext=(8, -12),
                 fontsize=7, color="darkred", fontweight="bold")
 
-        # Path line
-        if self.path_xy:
-            px, py = zip(*self.path_xy)
-            self.ax_map.plot(px, py, "-", color="blue", linewidth=2.0,
-                             alpha=0.8, zorder=5, label="路径")
-            # Waypoint dots
-            if len(px) > 2:
-                step = max(1, len(px) // 20)
-                self.ax_map.scatter(px[::step], py[::step], s=8, color="blue",
-                                    alpha=0.5, zorder=6)
+        # Feedback distance
+        if self._feedback_distance is not None:
+            self.ax_map.set_title(
+                self.ax_map.get_title() + f"  |  剩余: {self._feedback_distance:.2f}m",
+                fontsize=10, color="red")
 
         # Legend
-        self.ax_map.legend(loc="upper right", fontsize=8, framealpha=0.8)
+        self.ax_map.legend(loc="upper right", fontsize=7, framealpha=0.8)
 
         self.fig.canvas.draw_idle()
+
+    def _draw_costmap_overlay(self):
+        """Overlay global costmap as semi-transparent layer."""
+        info = self._costmap_info
+        data = self._global_costmap
+        if info is None or data is None:
+            return
+        # Mask: show only occupied/unknown cells (val > 0 for occupied, val < 0 for unknown)
+        # OccupancyGrid: 0=free, 100=occupied, -1=unknown
+        mask = data != 0
+        if not mask.any():
+            return
+        # Build RGBA overlay
+        rgba = np.zeros((info["height"], info["width"], 4), dtype=np.float32)
+        # Occupied cells: red with alpha
+        occupied = data > 0
+        rgba[occupied, 0] = 1.0   # R
+        rgba[occupied, 3] = 0.35  # alpha
+        # Unknown cells: gray with alpha
+        unknown = data < 0
+        rgba[unknown, 0:3] = 0.5
+        rgba[unknown, 3] = 0.2
+
+        extent = [
+            info["origin_x"],
+            info["origin_x"] + info["width"] * info["resolution"],
+            info["origin_y"],
+            info["origin_y"] + info["height"] * info["resolution"],
+        ]
+        self.ax_map.imshow(rgba, extent=extent, origin="lower",
+                           interpolation="nearest", zorder=4)
 
     def _update_status(self, msg: str):
         self._status_text.set_text(msg)
@@ -726,6 +830,8 @@ class MapVisualizer:
             self.goal_wx = None
             self.goal_wy = None
             self.path_xy = None
+            self._nav2_path = None
+            self._global_costmap = None
             # Update origin textboxes
             self._tb_ox.set_val(f"{self.map_data.origin_x:.1f}")
             self._tb_oy.set_val(f"{self.map_data.origin_y:.1f}")
@@ -736,7 +842,6 @@ class MapVisualizer:
 
     def _reload_with_origin(self, ox: float, oy: float):
         """Reload map data with a different origin (modifies in-memory)."""
-        # We create new map data by re-parsing the YAML and overriding origin
         self.map_data = MapData(self.map_data.yaml_path)
         self.map_data.origin_x = ox
         self.map_data.origin_y = oy
@@ -744,23 +849,144 @@ class MapVisualizer:
         self.goal_wx = None
         self.goal_wy = None
         self.path_xy = None
+        self._nav2_path = None
+        self._global_costmap = None
         self._update_status(f"✓ 原点已更新: [{ox:.2f}, {oy:.2f}, 0.0]")
         self._update_display()
 
     # ── ROS integration (online mode) ──────────────────────────────────
-    def _ros_send_goal(self):
-        """Try to send goal via ROS 2 /go_to_pose Action."""
+    def _init_ros(self):
+        """Initialize ROS 2 node and start background spin thread."""
         import rclpy
-        from rclpy.node import Node
-        from rclpy.action import ActionClient
-        from nav2_pose_navigator_interfaces.action import GoToPose
-        from geometry_msgs.msg import PoseStamped
-        from builtin_interfaces.msg import Duration
+        from nav_msgs.msg import Path, OccupancyGrid
 
         if not rclpy.ok():
             rclpy.init(args=[])
 
-        node = Node("map_viz_tool_client", namespace="")
+        self._ros_node = rclpy.create_node("map_viz_tool_online")
+        self._ros_running = True
+
+        # Subscribe to Nav2 plan (continuously updated during navigation)
+        self._ros_node.create_subscription(
+            Path, "/plan", self._on_plan_msg, 10)
+
+        # Subscribe to global costmap
+        self._ros_node.create_subscription(
+            OccupancyGrid, "/global_costmap/costmap", self._on_costmap_msg, 10)
+
+        # Background spin thread
+        self._ros_thread = threading.Thread(
+            target=self._ros_spin, daemon=True)
+        self._ros_thread.start()
+
+        self._update_status("✓ 在线模式已连接 ROS 2 — 监听 /plan + /global_costmap")
+
+    def _ros_spin(self):
+        """Background ROS spin (daemon thread)."""
+        import rclpy
+        from rclpy.executors import SingleThreadedExecutor
+        executor = SingleThreadedExecutor()
+        executor.add_node(self._ros_node)
+        try:
+            while self._ros_running and rclpy.ok():
+                executor.spin_once(timeout_sec=0.25)
+        except Exception:
+            pass
+        finally:
+            executor.remove_node(self._ros_node)
+
+    def _on_plan_msg(self, msg):
+        """Nav2 /plan callback — store path for display."""
+        path = []
+        for ps in msg.poses:
+            path.append((ps.pose.position.x, ps.pose.position.y))
+        self._nav2_path = path
+
+    def _on_costmap_msg(self, msg):
+        """Nav2 /global_costmap/costmap callback — store for overlay."""
+        data = np.array(msg.data, dtype=np.int8).reshape(
+            msg.metadata.height, msg.metadata.width)
+        self._global_costmap = data
+        self._costmap_info = {
+            "origin_x": msg.metadata.origin.position.x,
+            "origin_y": msg.metadata.origin.position.y,
+            "resolution": msg.metadata.resolution,
+            "width": msg.metadata.width,
+            "height": msg.metadata.height,
+        }
+
+    def _fetch_nav2_plan(self):
+        """Request Nav2 plan via ComputePathToPose action (one-shot)."""
+        if self.goal_wx is None or self.goal_wy is None:
+            self._update_status("⚠ 请先设置目标点!")
+            return
+
+        import rclpy
+        from rclpy.action import ActionClient
+        from nav2_msgs.action import ComputePathToPose
+
+        if not rclpy.ok():
+            rclpy.init(args=[])
+
+        temp = rclpy.create_node("plan_client_temp")
+        client = ActionClient(temp, ComputePathToPose, "compute_path_to_pose")
+
+        if not client.wait_for_server(timeout_sec=3.0):
+            temp.destroy_node()
+            self._update_status("✗ compute_path_to_pose 不在线 (Nav2 未启动?)")
+            return
+
+        goal = ComputePathToPose.Goal()
+        goal.goal.header.frame_id = "map"
+        goal.goal.pose.position.x = self.goal_wx
+        goal.goal.pose.position.y = self.goal_wy
+        goal.start.header.frame_id = "map"
+        goal.start.pose.position.x = self.start_wx
+        goal.start.pose.position.y = self.start_wy
+
+        self._update_status("正在请求 Nav2 规划…")
+        future = client.send_goal_async(goal)
+
+        exec_ = rclpy.executors.SingleThreadedExecutor()
+        exec_.add_node(temp)
+        while not future.done():
+            exec_.spin_once(timeout_sec=0.1)
+
+        gh = future.result()
+        if gh is None or not gh.accepted:
+            temp.destroy_node()
+            self._update_status("✗ Nav2 拒绝规划请求")
+            return
+
+        rf = gh.get_result_async()
+        while not rf.done():
+            exec_.spin_once(timeout_sec=0.1)
+
+        result = rf.result()
+        path = [(p.pose.position.x, p.pose.position.y)
+                for p in result.result.path.poses]
+
+        self._nav2_path = path
+        length = self._path_length(path) if path else 0.0
+        self._update_status(f"✓ Nav2 路径: {len(path)} 点, 长度 {length:.2f}m")
+        self._update_display()
+        temp.destroy_node()
+
+    def _ros_send_goal(self):
+        """Send goal to Nav2 via /go_to_pose Action with feedback tracking."""
+        if self.goal_wx is None or self.goal_wy is None:
+            self._update_status("⚠ 请先设置目标点!")
+            return
+
+        import rclpy
+        from rclpy.action import ActionClient
+        from nav2_pose_navigator_interfaces.action import GoToPose
+        import math
+
+        if not rclpy.ok():
+            rclpy.init(args=[])
+
+        node = rclpy.create_node("map_viz_tool_client")
         client = ActionClient(node, GoToPose, "go_to_pose")
 
         if not client.wait_for_server(timeout_sec=3.0):
@@ -773,9 +999,6 @@ class MapVisualizer:
         goal.target_pose.pose.position.x = self.goal_wx
         goal.target_pose.pose.position.y = self.goal_wy
         goal.target_pose.pose.position.z = 0.0
-
-        # Convert yaw to quaternion
-        import math
         half_yaw = self.goal_yaw / 2.0
         goal.target_pose.pose.orientation.z = math.sin(half_yaw)
         goal.target_pose.pose.orientation.w = math.cos(half_yaw)
@@ -783,23 +1006,30 @@ class MapVisualizer:
         self._update_status("正在发送目标到 Nav2…")
         future = client.send_goal_async(goal)
 
-        # Spin until result
-        executor = rclpy.executors.SingleThreadedExecutor()
-        executor.add_node(node)
+        exec_ = rclpy.executors.SingleThreadedExecutor()
+        exec_.add_node(node)
         while not future.done():
-            executor.spin_once(timeout_sec=0.1)
+            exec_.spin_once(timeout_sec=0.1)
 
         goal_handle = future.result()
         if goal_handle is None or not goal_handle.accepted:
             node.destroy_node()
             raise RuntimeError("Nav2 rejected the goal")
 
-        self._update_status("✓ 目标已发送到 Nav2，机器人正在导航…")
-        result_future = goal_handle.get_result_async()
-        while not result_future.done():
-            executor.spin_once(timeout_sec=0.1)
+        self._update_status("✓ 目标已发送，机器人正在导航…")
 
-        result = result_future.result()
+        # Track feedback distance
+        rf = goal_handle.get_result_async()
+        while not rf.done():
+            exec_.spin_once(timeout_sec=0.1)
+            fb = goal_handle.feedback
+            if fb is not None:
+                self._feedback_distance = fb.distance_remaining
+                self._update_status(
+                    f"导航中… 剩余距离: {fb.distance_remaining:.2f}m")
+
+        result = rf.result()
+        self._feedback_distance = None
         if result.result.success:
             self._update_status("✓ Nav2 导航成功! 已到达目标")
         else:
@@ -820,7 +1050,14 @@ class MapVisualizer:
         return total
 
     def show(self):
-        plt.show()
+        try:
+            plt.show()
+        finally:
+            self._ros_running = False
+            if self._ros_thread is not None:
+                self._ros_thread.join(timeout=1.0)
+            if self._ros_node is not None:
+                self._ros_node.destroy_node()
 
 
 # ╔══════════════════════════════════════════════════════════════════════════╗
