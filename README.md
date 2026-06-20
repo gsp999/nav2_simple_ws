@@ -130,10 +130,17 @@ ros2 launch nav2_pose_navigator bringup.launch.py map:=/path/to/custom.yaml
 ### 3. 发导航目标
 
 ```bash
-ros2 action send_goal /go_to_pose nav2_pose_navigator_interfaces/action/GoToPose \
-  "{target_pose: {header: {frame_id: map}, \
-    pose: {position: {x: 7.0, y: 2.0}, orientation: {x: 0.0, y: 0.0, z: 0.707, w: 0.707}}}}"
+# 一键发送 (x, y, yaw°) — 不需要手写四元数
+nav2_goal 7.0 2.0 90
+
+# yaw 用弧度
+nav2_goal 7.0 2.0 1.57 --rad
+
+# 自定义超时 (默认 60s)
+nav2_goal 7.0 2.0 90 --timeout 30
 ```
+
+> 底层等价于 `ros2 action send_goal /go_to_pose ...`，但自动做 yaw→四元数转换，显示实时反馈和最终结果。
 
 ### 4. Python 调用
 

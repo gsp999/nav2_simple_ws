@@ -24,6 +24,7 @@ setup(
             "goto_pose_server = nav2_pose_navigator.goto_pose_server:main",
             "ramp_zone_manager = nav2_pose_navigator.ramp_zone_manager:main",
             "map_viz_tool = nav2_pose_navigator.map_viz_tool:main",
+            "nav2_goal = nav2_pose_navigator.nav2_goal:main",
         ],
     },
 )
