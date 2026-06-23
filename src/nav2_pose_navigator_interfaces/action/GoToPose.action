@@ -5,6 +5,7 @@
 # and publishes distance_remaining feedback.
 
 geometry_msgs/PoseStamped target_pose
+float32 timeout_sec 0   # 总超时秒数，0 或负数 = 不限时
 ---
 bool success
 string message

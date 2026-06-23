@@ -78,12 +78,14 @@ cmd_vel_bridge → /t0x0101_action → Odin 底盘
 /go_to_pose  (nav2_pose_navigator_interfaces/action/GoToPose)
 
 请求:  target_pose (PoseStamped, frame_id="map")  — 要去哪
+       timeout_sec (float32, 默认 0)             — 总超时秒数，0 或负数 = 不限时
 结果:  success (bool) + message (string)          — 成功/失败
 反馈:  distance_remaining (float32)               — 剩余距离(米)
 
 行为:  目标 X≥9.3 (坡后) 时自动两段导航:
        ① 先到 (ramp_x_min-1.0, goal_y, yaw=0) — 坡前对齐
        ② 再到最终目标 — 过坡时 ramp_zone_manager 自动锁 yaw=0
+       超时检测贯穿两段总和，超时后自动取消 Nav2 目标并返回失败
 ```
 
 ## 坡面管理 (ramp_zone_manager)
@@ -145,6 +147,7 @@ goal.target_pose.pose.position.x = 7.0
 goal.target_pose.pose.position.y = 2.0
 goal.target_pose.pose.orientation.z = 0.707  # yaw=90°
 goal.target_pose.pose.orientation.w = 0.707
+goal.timeout_sec = 30.0  # 30 秒超时，0 或负数 = 不限时
 client.send_goal_async(goal)
 ```
 

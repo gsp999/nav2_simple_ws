@@ -60,8 +60,13 @@ class GoToPoseServer(Node):
 
     async def execute_callback(self, goal_handle):
         target_pose = goal_handle.request.target_pose
+        timeout_sec = goal_handle.request.timeout_sec
         tx = target_pose.pose.position.x
         ty = target_pose.pose.position.y
+
+        if timeout_sec > 0:
+            self.get_logger().info(f"Timeout set: {timeout_sec:.1f}s")
+        start_time = self.get_clock().now()
 
         if not self.nav2_client.wait_for_server(timeout_sec=5.0):
             goal_handle.abort()
@@ -70,7 +75,8 @@ class GoToPoseServer(Node):
         # ── Pre-ramp alignment: if goal is beyond ramp, align first ──
         if tx >= self.ramp_x_min:
             pre_result = await self._navigate_to_pre_ramp(
-                goal_handle, target_pose, tx, ty)
+                goal_handle, target_pose, tx, ty,
+                start_time=start_time, timeout_sec=timeout_sec)
             if pre_result is not None:
                 return pre_result  # failed or cancelled
 
@@ -79,11 +85,14 @@ class GoToPoseServer(Node):
         nav2_goal.pose = target_pose
 
         self.get_logger().info(f"Sending final goal: ({tx:.2f}, {ty:.2f})")
-        result = await self._run_navigate(goal_handle, nav2_goal, target_pose)
+        result = await self._run_navigate(
+            goal_handle, nav2_goal, target_pose,
+            start_time=start_time, timeout_sec=timeout_sec)
         self.get_logger().info(result.message)
         return result
 
-    async def _navigate_to_pre_ramp(self, goal_handle, target_pose, tx, ty):
+    async def _navigate_to_pre_ramp(self, goal_handle, target_pose, tx, ty,
+                                      start_time=None, timeout_sec=0.0):
         """Navigate to pre-ramp alignment point (1m before ramp, face +X)."""
         pre_x = self.ramp_x_min - self.pre_ramp_offset  # e.g. 8.3
         pre_y = ty
@@ -103,19 +112,24 @@ class GoToPoseServer(Node):
 
         self.get_logger().info(
             f"Phase 1 — align before ramp: ({pre_x:.2f}, {pre_y:.2f}, yaw=0)")
-        return await self._run_navigate(goal_handle, nav2_goal, pre_pose,
-                                         label="pre-ramp")
+        return await self._run_navigate(
+            goal_handle, nav2_goal, pre_pose, label="pre-ramp",
+            start_time=start_time, timeout_sec=timeout_sec)
 
     async def _run_navigate(self, goal_handle, nav2_goal, ref_pose,
-                             label="main"):
+                             label="main", start_time=None, timeout_sec=0.0):
         """Run a single NavigateToPose and return GoToPose.Result on
-        failure/cancel, or None on success (caller continues)."""
+        failure/cancel/timeout, or None on success (caller continues)."""
         send_future = self.nav2_client.send_goal_async(nav2_goal)
 
         while not send_future.done():
             if goal_handle.is_cancel_requested:
                 goal_handle.canceled()
                 return GoToPose.Result(success=False, message="Cancelled")
+            if self._check_timeout(start_time, timeout_sec):
+                return GoToPose.Result(
+                    success=False,
+                    message=f"Timeout {timeout_sec:.0f}s during {label} send")
             await self._sleep(0.05)
 
         goal_handle_nav2 = send_future.result()
@@ -131,6 +145,13 @@ class GoToPoseServer(Node):
                 goal_handle.canceled()
                 self._active_nav2_handle = None
                 return GoToPose.Result(success=False, message="Cancelled")
+
+            if self._check_timeout(start_time, timeout_sec):
+                goal_handle_nav2.cancel_goal_async()
+                self._active_nav2_handle = None
+                return GoToPose.Result(
+                    success=False,
+                    message=f"Timeout {timeout_sec:.0f}s during {label}")
 
             dist = self._compute_distance(ref_pose)
             goal_handle.publish_feedback(
@@ -155,6 +176,13 @@ class GoToPoseServer(Node):
         dx = self._current_pose.pose.position.x - target.pose.position.x
         dy = self._current_pose.pose.position.y - target.pose.position.y
         return math.sqrt(dx * dx + dy * dy)
+
+    def _check_timeout(self, start_time, timeout_sec: float) -> bool:
+        """Return True if timeout exceeded. 0 or negative = no timeout."""
+        if timeout_sec <= 0 or start_time is None:
+            return False
+        elapsed = (self.get_clock().now() - start_time).nanoseconds / 1e9
+        return elapsed > timeout_sec
 
     async def _sleep(self, seconds: float):
         await rclpy.task.Future()._asyncio_future_blocking_loop(

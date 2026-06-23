@@ -45,9 +45,11 @@ class GoalSender(Node):
         goal.target_pose.pose.position.x = x
         goal.target_pose.pose.position.y = y
         goal.target_pose.pose.orientation = yaw_to_quat(yaw)
+        goal.timeout_sec = timeout_s
 
         self.get_logger().info(
-            f"目标: x={x:.2f}, y={y:.2f}, yaw={math.degrees(yaw):.0f}°")
+            f"目标: x={x:.2f}, y={y:.2f}, yaw={math.degrees(yaw):.0f}°"
+            + (f", 超时={timeout_s:.0f}s" if timeout_s > 0 else ""))
         self._client.send_goal_async(goal).add_done_callback(self._goal_response_cb)
 
     def _goal_response_cb(self, future):
