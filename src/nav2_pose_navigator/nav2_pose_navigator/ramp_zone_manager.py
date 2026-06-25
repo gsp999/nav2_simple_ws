@@ -37,8 +37,8 @@ class RampZoneManager(Node):
     def __init__(self):
         super().__init__("ramp_zone_manager")
         self.declare_parameter("team", "red")
-        self.declare_parameter("ramp_x_min", 9.3)
-        self.declare_parameter("ramp_x_max", 10.8)
+        self.declare_parameter("ramp_x_min", 8.9)
+        self.declare_parameter("ramp_x_max", 10.4)
         self.declare_parameter("min_ramp_speed", 0.25)
         self.declare_parameter("suspension_ramp", 75.0)
         self.declare_parameter("suspension_flat", 30.0)
@@ -55,9 +55,9 @@ class RampZoneManager(Node):
         self.yaw_max_vel = self.get_parameter("yaw_max_vel").value
 
         if self.team == "blue":
-            self.ramp_y_min, self.ramp_y_max = 4.5, 6.0
+            self.ramp_y_min, self.ramp_y_max = 3.1, 4.6
         else:
-            self.ramp_y_min, self.ramp_y_max = -6.0, -4.5
+            self.ramp_y_min, self.ramp_y_max = -4.6, -3.1
 
         self.in_ramp = False
         self.current_yaw = 0.0

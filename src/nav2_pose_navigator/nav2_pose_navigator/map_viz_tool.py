@@ -297,8 +297,8 @@ class MapVisualizer:
 
         # State
         self._mode = "goal"       # "start" | "goal" | "none"
-        self.start_wx = 2.0       # default start
-        self.start_wy = -3.0 if team == "red" else 3.0
+        self.start_wx = 1.6       # default start
+        self.start_wy = -1.6 if team == "red" else 1.6
         self.goal_wx = None
         self.goal_wy = None
         self.goal_yaw = 0.0
@@ -486,10 +486,10 @@ class MapVisualizer:
                          color="red", alpha=0.7, style="italic")
 
         # Ramp zone marker
-        ramp_y_mid = ((4.5 + 6.0) / 2) if self.team == "blue" else ((-6.0 + -4.5) / 2)
+        ramp_y_mid = ((3.1 + 4.6) / 2) if self.team == "blue" else ((-4.6 + -3.1) / 2)
         if self.map_data.y_min <= ramp_y_mid <= self.map_data.y_max:
-            self.ax_map.axvspan(9.3, 10.8, alpha=0.08, color="green")
-            self.ax_map.text(10.05, ramp_y_mid, "斜坡", ha="center", fontsize=8,
+            self.ax_map.axvspan(8.9, 10.4, alpha=0.08, color="green")
+            self.ax_map.text(9.65, ramp_y_mid, "斜坡", ha="center", fontsize=8,
                              color="green", alpha=0.6)
 
     # ── Event connections ──────────────────────────────────────────────

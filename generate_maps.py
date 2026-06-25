@@ -1,19 +1,19 @@
 """Generate red/blue PGM maps — explicit per-team obstacles.
 
-Red obstacles (Y negative half, origin [0, -6, 0]):
-  梅林区:      X∈[3.2, 8.0], Y∈[-4.8, -1.2]
-  竞技区高台:   X=9.45, Y∈[-4.5, 0.0]
+Red obstacles (Y negative half, origin [-0.4, -4.6, 0]):
+  梅林区:      X∈[2.8, 7.6], Y∈[-3.4, 0.2]
+  竞技区高台:   X=9.05, Y∈[-3.1, 1.4]
 
-Blue obstacles (Y positive half, origin [0, 0, 0]):
-  梅林区:      X∈[3.2, 8.0], Y∈[1.2, 4.8]
-  竞技区高台:   X=9.45, Y∈[0.0, 4.5]
+Blue obstacles (Y positive half, origin [-0.4, -1.4, 0]):
+  梅林区:      X∈[2.8, 7.6], Y∈[-0.2, 3.4]
+  竞技区高台:   X=9.05, Y∈[-1.4, 3.1]
 
 斜坡边界墙 (ramp edge wall, IN PGM):
-  Red:  X∈[9.3, 10.8], Y=-4.5
-  Blue: X∈[9.3, 10.8], Y=4.5
+  Red:  X∈[8.9, 10.4], Y=-3.1
+  Blue: X∈[8.9, 10.4], Y=3.1
 斜坡区域 (ramp_zone only, NOT in PGM):
-  Red:  X∈[9.3, 10.8], Y∈[-6.0, -4.5]
-  Blue: X∈[9.3, 10.8], Y∈[4.5, 6.0]
+  Red:  X∈[8.9, 10.4], Y∈[-4.6, -3.1]
+  Blue: X∈[8.9, 10.4], Y∈[3.1, 4.6]
 """
 
 import numpy as np, os
@@ -51,47 +51,47 @@ def hline(img, x_w, y1, y2, oy, t=30):
 # ============================================================
 def generate_blue():
     img = blank()
-    oy = 0.0
+    oy = -1.4
 
     # outer boundary
-    hline(img, 0.0,   0.0, 6.0, oy, 30)    # top
-    hline(img, 11.97, 0.0, 6.0, oy, 30)    # bottom
-    vline(img, 5.97,  0.0, 11.97, oy, 30)  # right edge
+    hline(img, -0.4,  -1.4, 4.6,  oy, 30)   # left edge
+    hline(img, 11.57, -1.4, 4.6,  oy, 30)   # right edge
+    vline(img, 4.57,  -0.4, 11.57, oy, 30)  # top edge
 
-    # center wall Y=0 (left edge) — thin only, no thick wall in 武馆
-    vline(img, 0.015, 0.0, 11.97, oy, 30)
+    # center wall Y=0 — thin only, no thick wall in 武馆
+    vline(img, 0.015, -0.4, 11.57, oy, 30)
 
     # 梅林区
-    rect(img, 3.2, 8.0, 1.2, 4.8, oy)
+    rect(img, 2.8, 7.6, -0.2, 3.4, oy)
 
     # 竞技区高台 wall
-    rect(img, 9.45, 9.50, 0.0, 4.5, oy)
+    rect(img, 9.05, 9.10, -1.4, 3.1, oy)
 
-    # 斜坡边界墙  Y=4.5, X∈[9.3, 10.8]
-    vline(img, 4.5, 9.3, 10.8, oy, 30)
+    # 斜坡边界墙  Y=3.1, X∈[8.9, 10.4]
+    vline(img, 3.1, 8.9, 10.4, oy, 30)
 
     return img
 
 def generate_red():
     img = blank()
-    oy = -6.0
+    oy = -4.6
 
     # outer boundary
-    hline(img, 0.0,   -6.0, 0.0,   oy, 30)  # top
-    hline(img, 11.97, -6.0, 0.0,   oy, 30)  # bottom
-    vline(img, -5.97, 0.0,  11.97, oy, 30)  # left edge
+    hline(img, -0.4,  -4.6, 1.4,  oy, 30)   # left edge
+    hline(img, 11.57, -4.6, 1.4,  oy, 30)   # right edge
+    vline(img, 1.37,  -0.4, 11.57, oy, 30)  # top edge (Y=1.4 is top of red map)
 
-    # center wall Y=0 (right edge) — thin only, no thick wall in 武馆
-    vline(img, -0.015, 0.0, 11.97, oy, 30)
+    # center wall Y=0 — thin only, no thick wall in 武馆
+    vline(img, -0.015, -0.4, 11.57, oy, 30)
 
     # 梅林区
-    rect(img, 3.2, 8.0, -4.8, -1.2, oy)
+    rect(img, 2.8, 7.6, -3.4, 0.2, oy)
 
     # 竞技区高台 wall
-    rect(img, 9.45, 9.50, -4.5, 0.0, oy)
+    rect(img, 9.05, 9.10, -3.1, 1.4, oy)
 
-    # 斜坡边界墙  Y=-4.5, X∈[9.3, 10.8]
-    vline(img, -4.5, 9.3, 10.8, oy, 30)
+    # 斜坡边界墙  Y=-3.1, X∈[8.9, 10.4]
+    vline(img, -3.1, 8.9, 10.4, oy, 30)
 
     return img
 
@@ -111,9 +111,9 @@ if __name__ == '__main__':
     save_pgm(blue.copy(), os.path.join(out, 'field.pgm'))
 
     tpl = 'image: {pgm}\nresolution: 0.05\norigin: [{ox}, {oy}, 0.0]\nnegate: 0\noccupied_thresh: 0.65\nfree_thresh: 0.196\n'
-    for n, pgm, ox, oy in [('field_blue','field_blue.pgm',0,0),
-                            ('field_red','field_red.pgm',0,-6),
-                            ('field','field.pgm',0,0)]:
+    for n, pgm, ox, oy in [('field_blue','field_blue.pgm',-0.4,-1.4),
+                            ('field_red','field_red.pgm',-0.4,-4.6),
+                            ('field','field.pgm',-0.4,-1.4)]:
         with open(os.path.join(out, f'{n}.yaml'), 'w') as f:
             f.write(tpl.format(pgm=pgm, ox=ox, oy=oy))
 

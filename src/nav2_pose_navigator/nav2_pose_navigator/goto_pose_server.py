@@ -18,7 +18,7 @@ class GoToPoseServer(Node):
     def __init__(self):
         super().__init__("goto_pose_server")
 
-        self.declare_parameter("ramp_x_min", 9.3)
+        self.declare_parameter("ramp_x_min", 8.9)
         self.declare_parameter("pre_ramp_offset", 0.5)
         self.ramp_x_min = self.get_parameter("ramp_x_min").value
         self.pre_ramp_offset = self.get_parameter("pre_ramp_offset").value
