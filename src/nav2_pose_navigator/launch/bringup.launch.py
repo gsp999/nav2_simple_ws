@@ -106,6 +106,7 @@ def generate_launch_description():
                 executable="goto_pose_server",
                 name="goto_pose_server",
                 output="screen",
+                parameters=[{"team": LaunchConfiguration("team")}],
             )
         ],
     )

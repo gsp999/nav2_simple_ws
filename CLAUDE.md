@@ -59,7 +59,7 @@ X=11.6┤  场地边界墙(底)                ││   场地边界墙(底)
 GoToPose Action (x, y, yaw)
   │
   ▼
-goto_pose_server → 目标在坡后(X≥8.9)时自动两段: ①坡前0.5m对齐(yaw=0) → ②上坡
+goto_pose_server → 目标在坡后(X≥8.9)时自动两段: ①坡前0.25m对齐(yaw=0) → ②上坡
   │  调用 Nav2 NavigateToPose (含 MPPI GoalAngleCritic 自动对朝向)
   │
   │  /cmd_vel (Twist)
@@ -84,7 +84,7 @@ cmd_vel_bridge → /t0x0101_action → Odin 底盘
 反馈:  distance_remaining (float32)               — 剩余距离(米)
 
 行为:  目标 X≥8.9 (坡后) 时自动两段导航:
-       ① 先到 (ramp_x_min-0.5, goal_y, yaw=0) — 坡前对齐
+       ① 先到 (ramp_x_min-0.25, ramp_y_center, yaw=0) — 坡前对齐
        ② 再到最终目标 — 过坡时 ramp_zone_manager 自动锁 yaw=0
        超时检测贯穿两段总和，超时后自动取消 Nav2 目标并返回失败
 ```

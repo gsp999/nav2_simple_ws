@@ -18,10 +18,19 @@ class GoToPoseServer(Node):
     def __init__(self):
         super().__init__("goto_pose_server")
 
+        self.declare_parameter("team", "red")
         self.declare_parameter("ramp_x_min", 8.9)
-        self.declare_parameter("pre_ramp_offset", 0.5)
+        self.declare_parameter("pre_ramp_offset", 0.25)
+        self.team = self.get_parameter("team").value
         self.ramp_x_min = self.get_parameter("ramp_x_min").value
         self.pre_ramp_offset = self.get_parameter("pre_ramp_offset").value
+
+        # ramp Y center: align to middle of the ramp before climbing
+        if self.team == "blue":
+            ramp_y_min, ramp_y_max = 3.1, 4.6
+        else:
+            ramp_y_min, ramp_y_max = -4.6, -3.1
+        self.ramp_y_center = (ramp_y_min + ramp_y_max) / 2.0
 
         self.nav2_client = ActionClient(self, NavigateToPose, "navigate_to_pose")
 
@@ -43,7 +52,8 @@ class GoToPoseServer(Node):
 
         self.get_logger().info(
             f"GoToPoseServer ready — waiting for goals on /go_to_pose "
-            f"(ramp_x_min={self.ramp_x_min}, pre_ramp_offset={self.pre_ramp_offset})")
+            f"(team={self.team}, ramp_x_min={self.ramp_x_min}, "
+            f"ramp_y_center={self.ramp_y_center:.2f}, pre_ramp_offset={self.pre_ramp_offset})")
 
     def goal_callback(self, goal_request):
         self.get_logger().info(
@@ -93,9 +103,10 @@ class GoToPoseServer(Node):
 
     async def _navigate_to_pre_ramp(self, goal_handle, target_pose, tx, ty,
                                       start_time=None, timeout_sec=0.0):
-        """Navigate to pre-ramp alignment point (1m before ramp, face +X)."""
-        pre_x = self.ramp_x_min - self.pre_ramp_offset  # e.g. 8.3
-        pre_y = ty
+        """Navigate to pre-ramp alignment point (0.25m before ramp, face +X).
+        Aligns to ramp Y center, regardless of final goal Y."""
+        pre_x = self.ramp_x_min - self.pre_ramp_offset  # e.g. 8.4
+        pre_y = self.ramp_y_center
 
         pre_pose = PoseStamped()
         pre_pose.header.frame_id = "map"
