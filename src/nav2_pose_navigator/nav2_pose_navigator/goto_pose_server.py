@@ -99,6 +99,8 @@ class GoToPoseServer(Node):
         result = await self._run_navigate(
             goal_handle, nav2_goal, target_pose,
             start_time=start_time, timeout_sec=timeout_sec)
+        if result is None:
+            result = GoToPose.Result(success=True, message="Goal reached")
         self.get_logger().info(result.message)
         return result
 
