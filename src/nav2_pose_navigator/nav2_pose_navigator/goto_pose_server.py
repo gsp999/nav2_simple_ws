@@ -1,12 +1,12 @@
 """GoToPose Action server — wraps Nav2 NavigateToPose with progress feedback."""
 
-import asyncio
 import math
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.action.client import ActionClient
 from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.task import Future
 
 from geometry_msgs.msg import PoseStamped
 from nav2_msgs.action import NavigateToPose
@@ -197,7 +197,11 @@ class GoToPoseServer(Node):
         return elapsed > timeout_sec
 
     async def _sleep(self, seconds: float):
-        await asyncio.sleep(seconds)
+        """Sleep using rclpy Future (no asyncio event loop needed)."""
+        future = Future()
+        timer = self.create_timer(seconds, lambda: future.set_result(None))
+        await future
+        self.destroy_timer(timer)
 
 
 def main(args=None):
