@@ -34,17 +34,44 @@ class LifecycleBringup(Node):
             f"Bringing up {len(node_names)} nodes: {node_names}"
         )
 
-        # Build service clients
+        # Build service clients — with retries for slow ARM boards where
+        # costmap nodes (inside planner/controller) take a long time to
+        # finish constructing and expose their /change_state service.
         clients = {}
-        for name in node_names:
-            srv_name = f"/{name}/change_state"
-            cli = self.create_client(ChangeState, srv_name)
-            if not cli.wait_for_service(timeout_sec=svc_timeout):
-                self.get_logger().error(f"Service {srv_name} not available within {svc_timeout}s")
-                self._done(False)
-                return
-            clients[name] = cli
-            self.get_logger().info(f"  Found {srv_name}")
+        pending = list(node_names)
+        max_attempts = 5
+        for attempt in range(max_attempts):
+            still_pending = []
+            for name in pending:
+                srv_name = f"/{name}/change_state"
+                cli = clients.get(name)
+                if cli is None:
+                    cli = self.create_client(ChangeState, srv_name)
+                if cli.wait_for_service(timeout_sec=svc_timeout):
+                    clients[name] = cli
+                    self.get_logger().info(f"  Found {srv_name}")
+                else:
+                    still_pending.append(name)
+
+            pending = still_pending
+            if not pending:
+                break
+
+            if attempt < max_attempts - 1:
+                wait = 3.0 * (attempt + 1)
+                self.get_logger().warn(
+                    f"{len(pending)} service(s) not ready yet: {pending}. "
+                    f"Retrying in {wait:.0f}s (attempt {attempt+2}/{max_attempts})..."
+                )
+                time.sleep(wait)
+
+        if pending:
+            self.get_logger().error(
+                f"{len(pending)} service(s) still not available after "
+                f"{max_attempts} attempts: {[f'/{n}/change_state' for n in pending]}"
+            )
+            self._done(False)
+            return
 
         # Phase 1: CONFIGURE
         self.get_logger().info("=== Phase 1: CONFIGURE ===")

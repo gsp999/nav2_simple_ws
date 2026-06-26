@@ -110,8 +110,10 @@ def generate_launch_description():
     # lifecycle_manager's rapid-fire configure → get_state → activate cycle
     # and times out server-side (rmw_response.cpp:153).
     # This node calls change_state directly with generous inter-step sleeps.
+    # 8s delay gives costmap nodes (inside planner/controller_server) time
+    # to finish constructing before we start looking for their services.
     lifecycle_bringup = TimerAction(
-        period=5.0,
+        period=8.0,
         actions=[
             Node(
                 package="nav2_pose_navigator",
@@ -128,19 +130,14 @@ def generate_launch_description():
         ],
     )
 
-    # goto_pose_server starts after lifecycle_bringup finishes.
-    # Bringup: 5s delay + 8×(2+1)s ≈ 29s, add margin → 35s.
-    goto_pose_server = TimerAction(
-        period=35.0,
-        actions=[
-            Node(
-                package="nav2_pose_navigator",
-                executable="goto_pose_server",
-                name="goto_pose_server",
-                output="screen",
-                parameters=[{"team": LaunchConfiguration("team")}],
-            )
-        ],
+    # goto_pose_server starts immediately — no need to wait for Nav2.
+    # If a goal arrives before Nav2 is ready, it returns failure gracefully.
+    goto_pose_server = Node(
+        package="nav2_pose_navigator",
+        executable="goto_pose_server",
+        name="goto_pose_server",
+        output="screen",
+        parameters=[{"team": LaunchConfiguration("team")}],
     )
 
     # map_server needs the resolved YAML path, so we build it via OpaqueFunction
