@@ -134,7 +134,7 @@ local_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 2.0
-        inflation_radius: 0.40
+        inflation_radius: 0.30
 
 global_costmap:
   global_costmap:
@@ -145,7 +145,7 @@ global_costmap:
       always_send_full_costmap: true
       global_frame: nav_map
       robot_base_frame: base_link
-      robot_radius: 0.54
+      robot_radius: 0.30
       resolution: 0.05
       track_unknown_space: false
       plugins: ["static_layer", "inflation_layer"]
@@ -155,7 +155,7 @@ global_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 2.0
-        inflation_radius: 0.55
+        inflation_radius: 0.20
 
 map_server:
   ros__parameters:
