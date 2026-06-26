@@ -197,10 +197,15 @@ lifecycle_manager:
   ros__parameters:
     use_sim_time: false
     autostart: true
+    bond_timeout: 10.0
+    bond_respawn_max_duration: 20.0
+    attempt_respawn_reconnection: true
     node_names:
       - "map_server"
-      - "controller_server"
+      - "global_costmap"
       - "planner_server"
+      - "local_costmap"
+      - "controller_server"
       - "behavior_server"
       - "waypoint_follower"
       - "bt_navigator"

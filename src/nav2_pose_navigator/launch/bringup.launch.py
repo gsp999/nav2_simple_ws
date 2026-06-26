@@ -92,17 +92,46 @@ def generate_launch_description():
         parameters=[nav2_params],
     )
 
-    lifecycle_manager = Node(
-        package="nav2_lifecycle_manager", executable="lifecycle_manager",
-        name="lifecycle_manager", output="screen",
-        parameters=[nav2_params],
+    # LIFECYCLE_NODES order: costmaps before their parent servers so
+    # subscriptions to /map are set up before the servers need them.
+    _LIFECYCLE_NODES = [
+        "map_server",
+        "global_costmap",
+        "planner_server",
+        "local_costmap",
+        "controller_server",
+        "behavior_server",
+        "waypoint_follower",
+        "bt_navigator",
+    ]
+
+    # Custom manual bringup — replaces nav2_lifecycle_manager.
+    # On ARM boards (Radxa Airbox Q900) the DDS layer can't keep up with
+    # lifecycle_manager's rapid-fire configure → get_state → activate cycle
+    # and times out server-side (rmw_response.cpp:153).
+    # This node calls change_state directly with generous inter-step sleeps.
+    lifecycle_bringup = TimerAction(
+        period=5.0,
+        actions=[
+            Node(
+                package="nav2_pose_navigator",
+                executable="lifecycle_bringup",
+                name="lifecycle_bringup",
+                output="screen",
+                parameters=[{
+                    "node_names": _LIFECYCLE_NODES,
+                    "sleep_configure": 2.0,
+                    "sleep_activate": 1.0,
+                    "service_timeout": 10.0,
+                }],
+            )
+        ],
     )
 
-    # Delay goto_pose_server until Nav2 lifecycle nodes are fully active.
-    # lifecycle_manager (autostart: true) needs time to transition all nodes
-    # through configure→activate.
+    # goto_pose_server starts after lifecycle_bringup finishes.
+    # Bringup: 5s delay + 8×(2+1)s ≈ 29s, add margin → 35s.
     goto_pose_server = TimerAction(
-        period=8.0,
+        period=35.0,
         actions=[
             Node(
                 package="nav2_pose_navigator",
@@ -138,7 +167,7 @@ def generate_launch_description():
         behavior_server,
         waypoint_follower,
         bt_navigator,
-        lifecycle_manager,
+        lifecycle_bringup,
         goto_pose_server,
         OpaqueFunction(function=_launch_map_server),
     ])
