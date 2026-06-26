@@ -98,8 +98,11 @@ def generate_launch_description():
         parameters=[nav2_params],
     )
 
+    # Delay goto_pose_server until Nav2 lifecycle nodes are fully active.
+    # lifecycle_manager (autostart: true) needs time to transition all nodes
+    # through configure→activate.
     goto_pose_server = TimerAction(
-        period=5.0,
+        period=8.0,
         actions=[
             Node(
                 package="nav2_pose_navigator",

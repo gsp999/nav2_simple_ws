@@ -112,10 +112,28 @@ cmd_vel_bridge → /t0x0101_action → Odin 底盘
 | `/targetstate` | 输出 | Int32 | 目标状态（-1=减速模式） |
 | `/t0x0101_action` | 最终输出 | Float32MultiArray [vx,vy,wz] | 底盘速度 |
 
+## ⚠️ 环境前置条件
+
+**本机安装了 Miniconda，其 Python 3.13 会污染 PATH，导致 ROS 2 Jazzy（需要 Python 3.12）无法运行。**
+
+使用 ROS 2 前必须确保系统 Python 3.12 优先：
+
+```bash
+# 方法 1：直接屏蔽 conda
+conda deactivate
+export PATH="/usr/bin:$PATH"          # 确保 /usr/bin/python3 (=3.12) 在最前面
+source /opt/ros/jazzy/setup.bash
+
+# 方法 2：每次都在子 shell 里操作
+bash -c 'export PATH="/usr/bin:$PATH"; source /opt/ros/jazzy/setup.bash; colcon build'
+```
+
+如果遇到 `ModuleNotFoundError: No module named 'rclpy._rclpy_pybind11'`，说明 conda 的 Python 3.13 仍在 PATH 里。
+
 ## 使用方式
 
 ```bash
-# 构建
+# 构建（确保 conda 已 deactivate 或 PATH 中 /usr/bin 在最前面）
 source /opt/ros/jazzy/setup.bash
 colcon build
 source install/setup.bash

@@ -1,5 +1,6 @@
 """GoToPose Action server — wraps Nav2 NavigateToPose with progress feedback."""
 
+import asyncio
 import math
 import rclpy
 from rclpy.node import Node
@@ -196,9 +197,7 @@ class GoToPoseServer(Node):
         return elapsed > timeout_sec
 
     async def _sleep(self, seconds: float):
-        await rclpy.task.Future()._asyncio_future_blocking_loop(
-            lambda: None, timeout_sec=seconds
-        )
+        await asyncio.sleep(seconds)
 
 
 def main(args=None):

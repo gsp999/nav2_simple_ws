@@ -16,7 +16,6 @@ setup(
         (os.path.join("share", package_name, "maps"), glob("maps/*")),
     ],
     install_requires=["setuptools"],
-    zip_safe=True,
     entry_points={
         "console_scripts": [
             "odom_to_tf_node = nav2_pose_navigator.odom_to_tf_node:main",
