@@ -92,13 +92,13 @@ def generate_launch_description():
         parameters=[nav2_params],
     )
 
-    # LIFECYCLE_NODES order: costmaps before their parent servers so
-    # subscriptions to /map are set up before the servers need them.
+    # global_costmap / local_costmap are NOT independent lifecycle nodes
+    # in Nav2 Jazzy — they are sub-nodes created internally by
+    # planner_server / controller_server and managed by them.
+    # Only the parent servers need lifecycle transitions.
     _LIFECYCLE_NODES = [
         "map_server",
-        "global_costmap",
         "planner_server",
-        "local_costmap",
         "controller_server",
         "behavior_server",
         "waypoint_follower",
