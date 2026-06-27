@@ -2,7 +2,7 @@
 
 ## 一句话
 
-给坐标，导航过去。封装 Nav2 导航栈 + 坡面管理，对外暴露 `/go_to_pose` Action 和 `/desired_yaw` 话题。
+给坐标，导航过去。封装 Nav2 导航栈 + 坡面管理，对外暴露 `/go_to_pose` Action 和 `/desired_yaw` 话题，并用 RViz 显示 MPPI/Nav2 规划、轨迹、机器人姿态和速度。
 
 ## 仓库结构
 
@@ -17,10 +17,12 @@ nav2_simple_ws/
 │       │   ├── ramp_zone_manager.py      # 坡面管理（悬挂升降 + 锁yaw=0 + 最低速）
 │       │   ├── odom_to_tf_node.py        # TF: map→nav_map (static) + nav_map→base_link (动态，来自 Odin)
 │       │   └── cmd_vel_bridge.py         # 格式翻译: Twist → Float32MultiArray [vx,vy,wz]
-│       │   └── map_viz_tool.py           # 交互式地图可视化（离线A* + 在线Nav2路径/代价地图）
+│       │   ├── map_viz_tool.py           # 交互式地图可视化（离线A* + 在线Nav2路径/代价地图）
+│       │   └── mppi_rviz_visualizer.py   # RViz Marker/Path：机器人、朝向、速度、实际轨迹
 │       ├── config/nav2_params.yaml       # Nav2 参数 (MPPI Omni + SMAC 2D + 代价地图)
 │       ├── launch/bringup.launch.py      # 一键启动全部
 │       ├── maps/                         # 放地图 (.pgm + .yaml), 启动时用
+│       ├── rviz/                         # RViz 配置（MPPI/Nav2 全过程可视化）
 │       └── README.md                    # 完整文档（坐标系、红蓝差异、Python 示例）
 ```
 
@@ -71,6 +73,10 @@ ramp_zone_manager   ← 拦截修改速度
   │  /cmd_vel_adjusted (Twist)
   ▼
 cmd_vel_bridge → /t0x0111_action → Odin 底盘
+
+旁路可视化:
+  controller_server(MPPI visualize=true) → /trajectories + /optimal_trajectory + /transformed_global_plan
+  mppi_rviz_visualizer → /viz/robot_markers + /viz/robot_trail + /viz/global_plan
 ```
 
 ## Action 接口
@@ -108,6 +114,13 @@ cmd_vel_bridge → /t0x0111_action → Odin 底盘
 | `/cmd_vel` | Nav2 输出 | Twist | 原始速度 |
 | `/cmd_vel_adjusted` | ramp_zone_manager 输出 | Twist | 调整后的速度 |
 | `/desired_yaw` | 输入 | Float32 | 期望朝向（rad），发 999.0 取消锁定 |
+| `/plan` | Nav2 输出 | Path | 全局规划路径 |
+| `/trajectories` | MPPI 输出 | MarkerArray | MPPI 采样轨迹（RViz） |
+| `/optimal_trajectory` | MPPI 输出 | Path | MPPI 当前最优轨迹 |
+| `/transformed_global_plan` | MPPI 输出 | Path | MPPI 转换后的局部全局路径 |
+| `/viz/robot_markers` | 可视化输出 | MarkerArray | 机器人位置、朝向、速度箭头、速度文本 |
+| `/viz/robot_trail` | 可视化输出 | Path | 实际运动轨迹 |
+| `/viz/global_plan` | 可视化输出 | Path | 统一 frame 后的全局路径 |
 | `/t0x0102_action` | 输出 | Float32MultiArray [h,h,h,h] | 悬挂高度 |
 | `/targetstate` | 输出 | Int32 | 目标状态（-1=减速模式） |
 | `/t0x0111_action` | 最终输出 | Float32MultiArray [vx,vy,wz] | 底盘速度 |
@@ -147,6 +160,12 @@ ros2 launch nav2_pose_navigator bringup.launch.py team:=blue
 # 自定义地图（优先级最高）
 ros2 launch nav2_pose_navigator bringup.launch.py map:=/path/to/custom.yaml
 
+# 临时关闭 RViz 可视化辅助节点
+ros2 launch nav2_pose_navigator bringup.launch.py team:=red enable_rviz_viz:=false
+
+# 打开 RViz 全过程可视化
+rviz2 -d install/nav2_pose_navigator/share/nav2_pose_navigator/rviz/mppi_nav2_visualization.rviz
+
 # 发目标
 ros2 action send_goal /go_to_pose nav2_pose_navigator_interfaces/action/GoToPose \
   "{target_pose: {header: {frame_id: map}, \
@@ -180,9 +199,11 @@ ros-jazzy-nav2-msgs ros-jazzy-nav2-bringup ros-jazzy-nav2-mppi-controller
 ros-jazzy-nav2-smac-planner ros-jazzy-nav2-behaviors ros-jazzy-nav2-waypoint-follower
 ```
 
+RViz 可视化依赖 `visualization_msgs`，通常随 ROS/RViz 安装；固定坐标系使用 `nav_map`。
+
 ## 与 nav2_ws 的区别
 
 本仓库是 nav2_ws/src/nav2_robocon 的提炼版：
 - **保留**: odom_to_tf、cmd_vel_bridge、ramp_zone_manager、nav2_params.yaml、Nav2 启动、红蓝地图
 - **移除**: 任务序列 (third_area_single)、机械臂/升降控制、手动调试 (goal_relay_node)
-- **新增**: GoToPose Action 接口（含坡前自动对齐）；`team:=red/blue` 启动参数；ramp_zone_manager 进坡自动锁 yaw=0；map_viz_tool 在线模式 (--online) 实时显示 Nav2 路径和代价地图；斜坡边界墙 (generate_maps.py)
+- **新增**: GoToPose Action 接口（含坡前自动对齐）；`team:=red/blue` 启动参数；ramp_zone_manager 进坡自动锁 yaw=0；map_viz_tool 在线模式 (--online) 实时显示 Nav2 路径和代价地图；RViz MPPI/Nav2 全过程可视化；斜坡边界墙 (generate_maps.py)

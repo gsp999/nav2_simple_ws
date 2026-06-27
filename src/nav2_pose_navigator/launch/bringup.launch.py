@@ -10,7 +10,8 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction, TimerAction
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.conditions import IfCondition
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
@@ -33,6 +34,11 @@ def generate_launch_description():
     map_arg = DeclareLaunchArgument(
         "map", default_value="",
         description="Custom map YAML path (overrides team)",
+    )
+    enable_rviz_viz_arg = DeclareLaunchArgument(
+        "enable_rviz_viz",
+        default_value="true",
+        description="Start RViz Marker/Path visualization helper",
     )
 
     nav2_params = os.path.join(pkg_dir, "config", "nav2_params.yaml")
@@ -140,6 +146,21 @@ def generate_launch_description():
         parameters=[{"team": LaunchConfiguration("team")}],
     )
 
+    mppi_rviz_visualizer = Node(
+        package="nav2_pose_navigator",
+        executable="mppi_rviz_visualizer",
+        name="mppi_rviz_visualizer",
+        output="screen",
+        condition=IfCondition(LaunchConfiguration("enable_rviz_viz")),
+        parameters=[{
+            "frame_id": "nav_map",
+            "pose_topic": "/odin1/relocation",
+            "raw_cmd_topic": "/cmd_vel",
+            "adjusted_cmd_topic": "/cmd_vel_adjusted",
+            "plan_topic": "/plan",
+        }],
+    )
+
     # map_server needs the resolved YAML path, so we build it via OpaqueFunction
     def _launch_map_server(context):
         yaml_path = _resolve_map(context, pkg_dir)
@@ -156,6 +177,7 @@ def generate_launch_description():
     return LaunchDescription([
         team_arg,
         map_arg,
+        enable_rviz_viz_arg,
         odom_to_tf,
         ramp_zone_manager,
         cmd_vel_bridge,
@@ -166,5 +188,6 @@ def generate_launch_description():
         bt_navigator,
         lifecycle_bringup,
         goto_pose_server,
+        mppi_rviz_visualizer,
         OpaqueFunction(function=_launch_map_server),
     ])

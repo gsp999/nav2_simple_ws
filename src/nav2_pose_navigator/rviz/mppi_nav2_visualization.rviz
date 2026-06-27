@@ -1,0 +1,80 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Selection
+    Name: Selection
+  - Class: rviz_common/Tool Properties
+    Name: Tool Properties
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Enabled: true
+      Name: Grid
+      Plane: XY
+    - Alpha: 0.7
+      Class: rviz_default_plugins/Map
+      Enabled: true
+      Name: Map
+      Topic:
+        Value: /map
+    - Alpha: 0.45
+      Class: rviz_default_plugins/Map
+      Enabled: true
+      Name: Global Costmap
+      Topic:
+        Value: /global_costmap/costmap
+    - Alpha: 0.45
+      Class: rviz_default_plugins/Map
+      Enabled: true
+      Name: Local Costmap
+      Topic:
+        Value: /local_costmap/costmap
+    - Class: rviz_default_plugins/Path
+      Color: 0; 255; 255
+      Enabled: true
+      Name: Nav2 Plan
+      Topic:
+        Value: /plan
+    - Class: rviz_default_plugins/Path
+      Color: 255; 175; 0
+      Enabled: true
+      Name: Executed Trail
+      Topic:
+        Value: /viz/robot_trail
+    - Class: rviz_default_plugins/Path
+      Color: 0; 255; 0
+      Enabled: true
+      Name: MPPI Optimal Trajectory
+      Topic:
+        Value: /optimal_trajectory
+    - Class: rviz_default_plugins/Path
+      Color: 180; 180; 255
+      Enabled: true
+      Name: MPPI Transformed Plan
+      Topic:
+        Value: /transformed_global_plan
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: MPPI Sampled Trajectories
+      Topic:
+        Value: /trajectories
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Robot Markers
+      Topic:
+        Value: /viz/robot_markers
+  Enabled: true
+  Global Options:
+    Fixed Frame: nav_map
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+  Value: true
+Window Geometry:
+  Height: 900
+  Width: 1400

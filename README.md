@@ -1,6 +1,6 @@
 # nav2_pose_navigator
 
-给一个坐标，机器人自己导航过去。封装 Nav2 导航栈，对外暴露 `/go_to_pose` Action 和 `/desired_yaw` 话题。
+给一个坐标，机器人自己导航过去。封装 Nav2 导航栈，对外暴露 `/go_to_pose` Action 和 `/desired_yaw` 话题，并提供 RViz 可视化查看 MPPI/Nav2 规划和执行全过程。
 
 ## 坐标系
 
@@ -126,9 +126,28 @@ ros2 launch nav2_pose_navigator bringup.launch.py team:=blue
 
 # 自定义地图（优先级最高，覆盖 team 选择）
 ros2 launch nav2_pose_navigator bringup.launch.py map:=/path/to/custom.yaml
+
+# 如需临时关闭 RViz 可视化辅助节点
+ros2 launch nav2_pose_navigator bringup.launch.py team:=red enable_rviz_viz:=false
 ```
 
-### 3. 发导航目标
+### 3. 打开 RViz 可视化
+
+```bash
+rviz2 -d install/nav2_pose_navigator/share/nav2_pose_navigator/rviz/mppi_nav2_visualization.rviz
+```
+
+RViz 固定坐标系为 `nav_map`，默认显示：
+- `/map`：静态地图
+- `/global_costmap/costmap`、`/local_costmap/costmap`：全局/局部代价地图障碍物
+- `/plan`：Nav2 全局规划路径
+- `/trajectories`、`/optimal_trajectory`、`/transformed_global_plan`：MPPI 采样轨迹、最优轨迹、转换后的局部跟踪路径
+- `/viz/robot_markers`：机器人位置、朝向箭头、原始/调整后速度箭头、速度文本
+- `/viz/robot_trail`：机器人实际运动轨迹
+
+> MPPI 可视化已在 `nav2_params.yaml` 中启用：`FollowPath.visualize: true`，`TrajectoryVisualizer.trajectory_step: 5`，`time_step: 3`。
+
+### 4. 发导航目标
 
 ```bash
 # 一键发送 (x, y, yaw°) — 不需要手写四元数
@@ -143,7 +162,7 @@ ros2 run nav2_pose_navigator nav2_goal 7.0 2.0 90 --timeout 30
 
 > 底层等价于 `ros2 action send_goal /go_to_pose ...`，但自动做 yaw→四元数转换，显示实时反馈和最终结果。
 
-### 4. Python 调用
+### 5. Python 调用
 
 ```python
 from nav2_pose_navigator_interfaces.action import GoToPose
@@ -172,6 +191,7 @@ client.send_goal_async(goal)
 |------|--------|------|
 | `team` | `red` | `red` 或 `blue`，决定地图和坡道 Y 范围 |
 | `map` | (空) | 自定义地图 YAML 路径，设置后覆盖 team 的地图选择 |
+| `enable_rviz_viz` | `true` | 是否启动 `/viz/*` RViz 可视化辅助节点 |
 
 ### 坡面管理参数（ramp_zone_manager）
 
@@ -208,6 +228,24 @@ client.send_goal_async(goal)
 | 代价地图 | Static + Inflation | 分辨率 0.05m, 机器人半径 0.20m, 膨胀半径 0.40m |
 | 局部代价地图 | rolling window | 5m × 5m 滚动窗口 |
 
+### RViz 可视化参数（mppi_rviz_visualizer）
+
+**代码位置**：[mppi_rviz_visualizer.py](src/nav2_pose_navigator/nav2_pose_navigator/mppi_rviz_visualizer.py)
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `frame_id` | `nav_map` | RViz Marker/Path 发布坐标系 |
+| `pose_topic` | `/odin1/relocation` | 机器人实时位姿输入 |
+| `raw_cmd_topic` | `/cmd_vel` | Nav2 原始速度输入 |
+| `adjusted_cmd_topic` | `/cmd_vel_adjusted` | 坡面管理后的速度输入 |
+| `plan_topic` | `/plan` | Nav2 全局规划路径输入 |
+| `trail_max_points` | `1000` | 实际运动轨迹最多保留点数 |
+| `trail_min_distance` | `0.02` | 轨迹点最小间距 (m) |
+| `publish_frequency_hz` | `10.0` | Marker/Path 发布频率 |
+| `robot_radius` | `0.30` | RViz 中机器人圆柱半径 (m) |
+| `heading_arrow_length` | `0.70` | 朝向箭头长度 (m) |
+| `velocity_arrow_scale` | `0.60` | 速度箭头缩放系数 |
+
 ---
 
 ## 数据流
@@ -221,7 +259,7 @@ client.send_goal_async(goal)
          ▼
    Nav2 导航栈
      ├── planner_server   (SMAC 2D — 全局路径规划)
-     └── controller_server (MPPI Omni — 局部轨迹跟踪)
+     └── controller_server (MPPI Omni — 局部轨迹跟踪 + 轨迹可视化)
          │  输出 /cmd_vel (Twist)
          ▼
    ramp_zone_manager (拦截修改)
@@ -233,6 +271,11 @@ client.send_goal_async(goal)
          │  Twist → Float32MultiArray [vx, vy, wz]
          ▼
    /t0x0111_action → Odin 底盘执行
+
+   mppi_rviz_visualizer (旁路监听，不参与控制)
+     ├── /odin1/relocation → /viz/robot_trail + 机器人位置/朝向 Marker
+     ├── /cmd_vel + /cmd_vel_adjusted → 速度箭头 + 速度文本 Marker
+     └── /plan → /viz/global_plan + 路径 Marker
 ```
 
 ### Action 接口
@@ -254,6 +297,13 @@ client.send_goal_async(goal)
 | `/cmd_vel` | Nav2 输出 | Twist | 原始速度 |
 | `/cmd_vel_adjusted` | ramp_zone_manager 输出 | Twist | 调整后速度 |
 | `/desired_yaw` | 输入 | Float32 | 期望朝向(rad)，发 >900 或 NaN 取消锁定 |
+| `/plan` | Nav2 输出 | Path | 全局规划路径 |
+| `/trajectories` | MPPI 输出 | MarkerArray | MPPI 采样轨迹（RViz） |
+| `/optimal_trajectory` | MPPI 输出 | Path | MPPI 当前最优轨迹 |
+| `/transformed_global_plan` | MPPI 输出 | Path | MPPI 局部转换后的全局路径 |
+| `/viz/robot_markers` | 可视化输出 | MarkerArray | 机器人、朝向、速度、状态文本 |
+| `/viz/robot_trail` | 可视化输出 | Path | 实际运动轨迹 |
+| `/viz/global_plan` | 可视化输出 | Path | 统一 frame 后的全局路径 |
 | `/t0x0102_action` | 输出 | Float32MultiArray [h,h,h,h] | 悬挂高度 |
 | `/targetstate` | 输出 | Int32 | 目标状态（-1=减速） |
 | `/t0x0111_action` | 最终输出 | Float32MultiArray [vx,vy,wz] | 底盘速度 |

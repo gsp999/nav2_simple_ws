@@ -13,6 +13,7 @@ setup(
         ("share/" + package_name, ["package.xml"]),
         (os.path.join("share", package_name, "launch"), glob("launch/*.py")),
         (os.path.join("share", package_name, "config"), glob("config/*.yaml")),
+        (os.path.join("share", package_name, "rviz"), glob("rviz/*.rviz")),
         (os.path.join("share", package_name, "maps"), glob("maps/*")),
     ],
     install_requires=["setuptools"],
@@ -25,6 +26,7 @@ setup(
             "map_viz_tool = nav2_pose_navigator.map_viz_tool:main",
             "nav2_goal = nav2_pose_navigator.nav2_goal:main",
             "lifecycle_bringup = nav2_pose_navigator.lifecycle_bringup:main",
+            "mppi_rviz_visualizer = nav2_pose_navigator.mppi_rviz_visualizer:main",
         ],
     },
 )
