@@ -70,7 +70,7 @@ ramp_zone_manager   ← 拦截修改速度
   │
   │  /cmd_vel_adjusted (Twist)
   ▼
-cmd_vel_bridge → /t0x0101_action → Odin 底盘
+cmd_vel_bridge → /t0x0111_action → Odin 底盘
 ```
 
 ## Action 接口
@@ -110,7 +110,7 @@ cmd_vel_bridge → /t0x0101_action → Odin 底盘
 | `/desired_yaw` | 输入 | Float32 | 期望朝向（rad），发 999.0 取消锁定 |
 | `/t0x0102_action` | 输出 | Float32MultiArray [h,h,h,h] | 悬挂高度 |
 | `/targetstate` | 输出 | Int32 | 目标状态（-1=减速模式） |
-| `/t0x0101_action` | 最终输出 | Float32MultiArray [vx,vy,wz] | 底盘速度 |
+| `/t0x0111_action` | 最终输出 | Float32MultiArray [vx,vy,wz] | 底盘速度 |
 
 ## ⚠️ 环境前置条件
 

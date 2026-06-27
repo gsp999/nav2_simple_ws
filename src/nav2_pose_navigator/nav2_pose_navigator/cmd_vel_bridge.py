@@ -1,4 +1,4 @@
-"""Twist (/cmd_vel) -> smoothed Float32MultiArray (/t0x0101_action).
+"""Twist (/cmd_vel) -> smoothed Float32MultiArray (/t0x0111_action).
 
 The hardware command topic expects [vx, vy, wz].  Nav2 controllers can change
 their command sharply from one cycle to the next, so this bridge applies a
@@ -41,11 +41,11 @@ class CmdVelBridge(Node):
         self.last_publish_time = self.last_cmd_time
 
         self.sub = self.create_subscription(Twist, "/cmd_vel", self.cb, 10)
-        self.pub = self.create_publisher(Float32MultiArray, "/t0x0101_action", 10)
+        self.pub = self.create_publisher(Float32MultiArray, "/t0x0111_action", 10)
         period = 1.0 / max(self.publish_frequency_hz, 1.0)
         self.timer = self.create_timer(period, self.publish_smoothed)
         self.get_logger().info(
-            "cmd_vel_bridge: /cmd_vel -> /t0x0101_action [vx, vy, wz], "
+            "cmd_vel_bridge: /cmd_vel -> /t0x0111_action [vx, vy, wz], "
             f"rate={self.publish_frequency_hz:.1f}Hz, "
             f"lin_acc={self.max_linear_accel:.2f}m/s^2, "
             f"ang_acc={self.max_angular_accel:.2f}rad/s^2")

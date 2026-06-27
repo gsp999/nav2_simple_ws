@@ -232,7 +232,7 @@ client.send_goal_async(goal)
    cmd_vel_bridge
          │  Twist → Float32MultiArray [vx, vy, wz]
          ▼
-   /t0x0101_action → Odin 底盘执行
+   /t0x0111_action → Odin 底盘执行
 ```
 
 ### Action 接口
@@ -256,7 +256,7 @@ client.send_goal_async(goal)
 | `/desired_yaw` | 输入 | Float32 | 期望朝向(rad)，发 >900 或 NaN 取消锁定 |
 | `/t0x0102_action` | 输出 | Float32MultiArray [h,h,h,h] | 悬挂高度 |
 | `/targetstate` | 输出 | Int32 | 目标状态（-1=减速） |
-| `/t0x0101_action` | 最终输出 | Float32MultiArray [vx,vy,wz] | 底盘速度 |
+| `/t0x0111_action` | 最终输出 | Float32MultiArray [vx,vy,wz] | 底盘速度 |
 
 ---
 
