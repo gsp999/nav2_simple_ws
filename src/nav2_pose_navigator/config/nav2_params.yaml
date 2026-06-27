@@ -6,7 +6,7 @@ bt_navigator:
     odom_topic: /odin1/odometry_highfreq
     transform_tolerance: 0.2
     bt_loop_duration: 10
-    default_server_timeout: 20
+    default_server_timeout: 60
     navigators: ["navigate_to_pose", "navigate_through_poses"]
     navigate_to_pose:
       plugin: "nav2_bt_navigator::NavigateToPoseNavigator"
@@ -27,7 +27,7 @@ controller_server:
     progress_checker:
       plugin: "nav2_controller::SimpleProgressChecker"
       required_movement_radius: 0.05
-      movement_time_allowance: 10.0
+      movement_time_allowance: 25.0
 
     goal_checker:
       plugin: "nav2_controller::SimpleGoalChecker"
@@ -40,21 +40,21 @@ controller_server:
       time_steps: 56
       model_dt: 0.05
       batch_size: 2000
-      vx_std: 0.1
-      vy_std: 0.1
-      wz_std: 0.15
-      vx_max: 1.0
+      vx_std: 0.05
+      vy_std: 0.05
+      wz_std: 0.07
+      vx_max: 2.5
       vx_min: 0.0
-      vy_max: 1.0
+      vy_max: 2.5
       wz_max: 1.5
       iteration_count: 1
       prune_distance: 1.7
       transform_tolerance: 0.2
-      temperature: 0.3
-      gamma: 0.015
+      temperature: 0.6
+      gamma: 0.04
       motion_model: "Omni"
       visualize: false
-      reset_period: 1.0
+      reset_period: 4.0
       regenerate_noises: false
       critics:
         - "ObstaclesCritic"
@@ -65,26 +65,26 @@ controller_server:
       ObstaclesCritic:
         enabled: true
         cost_power: 1
-        repulsion_weight: 1.5
+        repulsion_weight: 1.0
         critical_weight: 20.0
         consider_footprint: false
         collision_cost: 10000.0
-        collision_margin_distance: 0.1
+        collision_margin_distance: 0.05
         near_goal_distance: 0.5
       GoalCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 20.0
+        cost_weight: 40.0
         threshold_to_consider: 3.0
       GoalAngleCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 6.0
-        threshold_to_consider: 1.2
+        cost_weight: 2.5
+        threshold_to_consider: 0.5
       PathAlignCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 20.0
+        cost_weight: 7.0
         max_path_occupancy_ratio: 0.05
         trajectory_point_step: 3
         threshold_to_consider: 0.5
@@ -92,7 +92,7 @@ controller_server:
       PathFollowCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 10.0
+        cost_weight: 4.0
         offset_from_furthest: 5
         threshold_to_consider: 1.4
 
@@ -109,7 +109,7 @@ planner_server:
       allow_unknown: false
       max_iterations: 1000000
       max_on_approach_iterations: 1000
-      max_planning_time: 2.0
+      max_planning_time: 5.0
       cost_travel_multiplier: 2.0
       use_final_approach_orientation: false
 
@@ -134,7 +134,7 @@ local_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 2.0
-        inflation_radius: 0.30
+        inflation_radius: 0.25
 
 global_costmap:
   global_costmap:

@@ -21,7 +21,7 @@ class GoToPoseServer(Node):
 
         self.declare_parameter("team", "red")
         self.declare_parameter("ramp_x_min", 8.9)
-        self.declare_parameter("pre_ramp_offset", 0.25)
+        self.declare_parameter("pre_ramp_offset", 0.5)
         self.team = self.get_parameter("team").value
         self.ramp_x_min = self.get_parameter("ramp_x_min").value
         self.pre_ramp_offset = self.get_parameter("pre_ramp_offset").value
@@ -106,9 +106,9 @@ class GoToPoseServer(Node):
 
     async def _navigate_to_pre_ramp(self, goal_handle, target_pose, tx, ty,
                                       start_time=None, timeout_sec=0.0):
-        """Navigate to pre-ramp alignment point (0.25m before ramp, face +X).
+        """Navigate to pre-ramp alignment point (0.5m before ramp, face +X).
         Aligns to ramp Y center, regardless of final goal Y."""
-        pre_x = self.ramp_x_min - self.pre_ramp_offset  # e.g. 8.4
+        pre_x = self.ramp_x_min - self.pre_ramp_offset  # e.g. 8.9 - 0.5 = 8.4
         pre_y = self.ramp_y_center
 
         pre_pose = PoseStamped()
