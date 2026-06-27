@@ -137,6 +137,37 @@ ros2 launch nav2_pose_navigator bringup.launch.py team:=red enable_rviz_viz:=fal
 rviz2 -d install/nav2_pose_navigator/share/nav2_pose_navigator/rviz/mppi_nav2_visualization.rviz
 ```
 
+如果在 Radxa 的 SSH 终端里看到：
+
+```text
+qt.qpa.xcb: could not connect to display
+Could not load the Qt platform plugin "xcb"
+```
+
+说明当前终端没有图形显示环境。`rviz2` 是 GUI 程序，不能在普通无显示 SSH 里直接打开。推荐做法是：
+
+```bash
+# Radxa 上只启动导航和可视化话题发布
+ros2 launch nav2_pose_navigator bringup.launch.py team:=red
+
+# 在有桌面的电脑上打开 RViz，并连接同一个 ROS 2 网络
+source install/setup.bash
+rviz2 -d install/nav2_pose_navigator/share/nav2_pose_navigator/rviz/mppi_nav2_visualization.rviz
+```
+
+如果必须在 Radxa 上看 RViz，需要使用其中一种图形环境：
+- 接显示器并登录桌面后运行 `rviz2`
+- 用 VNC/远程桌面登录 Radxa 桌面后运行 `rviz2`
+- 用 SSH X11 转发：`ssh -X radxa@radxa-airbox-q900`，并确认本机有 X server
+
+排查命令：
+
+```bash
+echo $DISPLAY
+```
+
+如果输出为空，当前终端不能直接启动 RViz。
+
 RViz 固定坐标系为 `nav_map`，默认显示：
 - `/map`：静态地图
 - `/global_costmap/costmap`、`/local_costmap/costmap`：全局/局部代价地图障碍物

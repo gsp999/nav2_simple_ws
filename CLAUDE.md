@@ -166,6 +166,9 @@ ros2 launch nav2_pose_navigator bringup.launch.py team:=red enable_rviz_viz:=fal
 # 打开 RViz 全过程可视化
 rviz2 -d install/nav2_pose_navigator/share/nav2_pose_navigator/rviz/mppi_nav2_visualization.rviz
 
+# 如果 SSH 里报 "qt.qpa.xcb: could not connect to display"
+# 说明当前终端没有图形显示环境；Radxa 只跑 bringup，在有桌面的电脑/VNC/X11 转发里打开 rviz2。
+
 # 发目标
 ros2 action send_goal /go_to_pose nav2_pose_navigator_interfaces/action/GoToPose \
   "{target_pose: {header: {frame_id: map}, \
