@@ -315,6 +315,14 @@ class MapVisualizer:
         self._show_nav2 = True        # toggle: show Nav2 path vs A*
         self._show_costmap = True     # toggle: show global costmap overlay
         self._feedback_distance = None  # last distance feedback from action
+        self._current_pose = None     # (x, y, yaw) from /odin1/relocation
+        self._robot_trail = deque(maxlen=1000)
+        self._raw_cmd = (0.0, 0.0, 0.0)
+        self._adjusted_cmd = (0.0, 0.0, 0.0)
+        self._final_cmd = (0.0, 0.0, 0.0)
+        self._last_pose_time = None
+        self._last_cmd_time = None
+        self._display_timer = None
 
         if online:
             self._init_ros()
@@ -323,6 +331,8 @@ class MapVisualizer:
         self._build_figure()
         self._connect_events()
         self._update_display()
+        if online:
+            self._start_display_timer()
 
     # ── Figure construction ────────────────────────────────────────────
     def _build_figure(self):
@@ -342,8 +352,23 @@ class MapVisualizer:
         self.fig.canvas.manager.set_window_title("Nav2 Map Viz Tool")
 
         # ── Main map axes (bulk of the figure) ──
-        self.ax_map = self.fig.add_axes([0.04, 0.205, 0.92, 0.77])
+        self.ax_map = self.fig.add_axes([0.04, 0.205, 0.73, 0.77])
         self._draw_map_base()
+
+        # ── Online telemetry panel ──
+        self.ax_info = self.fig.add_axes([0.79, 0.205, 0.17, 0.77])
+        self.ax_info.set_facecolor("#111827")
+        self.ax_info.set_xticks([])
+        self.ax_info.set_yticks([])
+        for spine in self.ax_info.spines.values():
+            spine.set_color("#374151")
+        self._info_text = self.ax_info.text(
+            0.06, 0.96, "",
+            transform=self.ax_info.transAxes,
+            fontsize=8.5,
+            color="#f9fafb",
+            verticalalignment="top",
+            family="monospace")
 
         # ── Status bar ──
         ax_status = self.fig.add_axes([0.04, 0.160, 0.92, 0.038])
@@ -474,6 +499,18 @@ class MapVisualizer:
 
         # Zone labels
         self._add_zone_labels()
+
+    def _start_display_timer(self):
+        """Refresh online overlays without waiting for mouse/button events."""
+        self._display_timer = self.fig.canvas.new_timer(interval=250)
+        self._display_timer.add_callback(self._on_display_timer)
+        self._display_timer.start()
+
+    def _on_display_timer(self):
+        if self._ros_running:
+            self._update_display()
+            return True
+        return False
 
     def _add_zone_labels(self):
         """Add zone labels (武馆, 梅花林, 擂台, 斜坡)."""
@@ -746,6 +783,10 @@ class MapVisualizer:
                 self.ax_map.scatter(px[::step], py[::step], s=8, color="blue",
                                     alpha=0.5, zorder=6)
 
+        # ── Robot live pose + executed trail ──
+        if self.online:
+            self._draw_robot_overlay()
+
         # Start marker (green circle)
         self.ax_map.plot(self.start_wx, self.start_wy, "o", color="green",
                          markersize=10, markeredgecolor="darkgreen",
@@ -781,8 +822,98 @@ class MapVisualizer:
 
         # Legend
         self.ax_map.legend(loc="upper right", fontsize=7, framealpha=0.8)
+        self._update_info_panel()
 
         self.fig.canvas.draw_idle()
+
+    def _draw_robot_overlay(self):
+        """Draw live robot pose, heading, velocity vector, and executed trail."""
+        if self._robot_trail:
+            tx, ty = zip(*self._robot_trail)
+            self.ax_map.plot(tx, ty, "-", color="#f39c12", linewidth=2.0,
+                             alpha=0.85, zorder=8, label="实际轨迹")
+
+        if self._current_pose is None:
+            return
+
+        x, y, yaw = self._current_pose
+        body = plt.Circle((x, y), self.robot_radius, color="#fdcb6e",
+                          ec="#2d3436", linewidth=1.5, alpha=0.9, zorder=12)
+        self.ax_map.add_patch(body)
+        self.ax_map.arrow(
+            x, y, 0.55 * np.cos(yaw), 0.55 * np.sin(yaw),
+            head_width=0.16, head_length=0.20,
+            fc="#d63031", ec="#d63031", linewidth=2.0, zorder=13,
+            length_includes_head=True)
+
+        vx, vy, _ = self._adjusted_cmd
+        speed = np.hypot(vx, vy)
+        if speed > 0.02:
+            world_vx = vx * np.cos(yaw) - vy * np.sin(yaw)
+            world_vy = vx * np.sin(yaw) + vy * np.cos(yaw)
+            self.ax_map.arrow(
+                x, y, 0.55 * world_vx, 0.55 * world_vy,
+                head_width=0.10, head_length=0.14,
+                fc="#00cec9", ec="#0984e3", linewidth=1.5, zorder=13,
+                length_includes_head=True)
+        self.ax_map.annotate(
+            f"机器人\n({x:.2f},{y:.2f})",
+            (x, y), textcoords="offset points", xytext=(8, 8),
+            fontsize=7, color="#2d3436", fontweight="bold", zorder=14)
+
+    def _update_info_panel(self):
+        if not hasattr(self, "_info_text"):
+            return
+        if not self.online:
+            self._info_text.set_text("OFFLINE\n\n使用 --online 连接 ROS 2")
+            return
+
+        pose_line = "pose: waiting"
+        if self._current_pose is not None:
+            x, y, yaw = self._current_pose
+            pose_age = self._age_text(self._last_pose_time)
+            pose_line = f"pose: {x:5.2f}, {y:5.2f}\nyaw : {yaw:5.2f} rad\nage : {pose_age}"
+
+        raw = self._format_cmd("raw /cmd_vel", self._raw_cmd)
+        adj = self._format_cmd("adj /cmd_vel_adjusted", self._adjusted_cmd)
+        final = self._format_cmd("final /t0x0111", self._final_cmd)
+        cmd_age = self._age_text(self._last_cmd_time)
+        plan_points = len(self._nav2_path) if self._nav2_path else 0
+        trail_points = len(self._robot_trail)
+        costmap = "yes" if self._global_costmap is not None else "waiting"
+
+        text = (
+            "ONLINE TELEMETRY\n"
+            "----------------\n"
+            f"{pose_line}\n\n"
+            f"{raw}\n\n"
+            f"{adj}\n\n"
+            f"{final}\n"
+            f"cmd age: {cmd_age}\n\n"
+            f"Nav2 plan : {plan_points:4d} pts\n"
+            f"trail     : {trail_points:4d} pts\n"
+            f"costmap   : {costmap}\n\n"
+            "颜色:\n"
+            " cyan   Nav2路径\n"
+            " orange 实际轨迹\n"
+            " red    朝向\n"
+            " blue   调整后速度")
+        self._info_text.set_text(text)
+
+    @staticmethod
+    def _format_cmd(label: str, cmd):
+        vx, vy, wz = cmd
+        speed = np.hypot(vx, vy)
+        return (
+            f"{label}\n"
+            f"  vx={vx:5.2f} vy={vy:5.2f}\n"
+            f"  wz={wz:5.2f} sp={speed:5.2f}")
+
+    @staticmethod
+    def _age_text(stamp):
+        if stamp is None:
+            return "never"
+        return f"{time.time() - stamp:4.1f}s"
 
     def _draw_costmap_overlay(self):
         """Overlay global costmap as semi-transparent layer."""
@@ -816,6 +947,8 @@ class MapVisualizer:
                            interpolation="nearest", zorder=4)
 
     def _update_status(self, msg: str):
+        if not hasattr(self, "_status_text"):
+            return
         self._status_text.set_text(msg)
         try:
             self.fig.canvas.draw_idle()
@@ -859,6 +992,8 @@ class MapVisualizer:
         """Initialize ROS 2 node and start background spin thread."""
         import rclpy
         from nav_msgs.msg import Path, OccupancyGrid
+        from geometry_msgs.msg import PoseStamped, Twist
+        from std_msgs.msg import Float32MultiArray
 
         if not rclpy.ok():
             rclpy.init(args=[])
@@ -874,12 +1009,23 @@ class MapVisualizer:
         self._ros_node.create_subscription(
             OccupancyGrid, "/global_costmap/costmap", self._on_costmap_msg, 10)
 
+        # Subscribe to live robot pose and velocity chain
+        self._ros_node.create_subscription(
+            PoseStamped, "/odin1/relocation", self._on_pose_msg, 10)
+        self._ros_node.create_subscription(
+            Twist, "/cmd_vel", self._on_raw_cmd_msg, 10)
+        self._ros_node.create_subscription(
+            Twist, "/cmd_vel_adjusted", self._on_adjusted_cmd_msg, 10)
+        self._ros_node.create_subscription(
+            Float32MultiArray, "/t0x0111_action", self._on_final_cmd_msg, 10)
+
         # Background spin thread
         self._ros_thread = threading.Thread(
             target=self._ros_spin, daemon=True)
         self._ros_thread.start()
 
-        self._update_status("✓ 在线模式已连接 ROS 2 — 监听 /plan + /global_costmap")
+        self._update_status(
+            "✓ 在线模式已连接 ROS 2 — 监听 /plan + /global_costmap + pose + speed")
 
     def _ros_spin(self):
         """Background ROS spin (daemon thread)."""
@@ -914,6 +1060,37 @@ class MapVisualizer:
             "width": msg.metadata.width,
             "height": msg.metadata.height,
         }
+
+    def _on_pose_msg(self, msg):
+        """Robot pose callback — store pose and append executed trail."""
+        q = msg.pose.orientation
+        yaw = np.arctan2(
+            2.0 * (q.w * q.z + q.x * q.y),
+            1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+        x = msg.pose.position.x
+        y = msg.pose.position.y
+        self._current_pose = (x, y, yaw)
+        self._last_pose_time = time.time()
+        if not self._robot_trail:
+            self._robot_trail.append((x, y))
+            return
+        lx, ly = self._robot_trail[-1]
+        if np.hypot(x - lx, y - ly) >= 0.02:
+            self._robot_trail.append((x, y))
+
+    def _on_raw_cmd_msg(self, msg):
+        self._raw_cmd = (msg.linear.x, msg.linear.y, msg.angular.z)
+        self._last_cmd_time = time.time()
+
+    def _on_adjusted_cmd_msg(self, msg):
+        self._adjusted_cmd = (msg.linear.x, msg.linear.y, msg.angular.z)
+        self._last_cmd_time = time.time()
+
+    def _on_final_cmd_msg(self, msg):
+        data = list(msg.data)
+        if len(data) >= 3:
+            self._final_cmd = (float(data[0]), float(data[1]), float(data[2]))
+            self._last_cmd_time = time.time()
 
     def _fetch_nav2_plan(self):
         """Request Nav2 plan via ComputePathToPose action (one-shot)."""

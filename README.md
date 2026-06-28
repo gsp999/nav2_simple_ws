@@ -178,7 +178,37 @@ RViz 固定坐标系为 `nav_map`，默认显示：
 
 > MPPI 可视化已在 `nav2_params.yaml` 中启用：`FollowPath.visualize: true`，`TrajectoryVisualizer.trajectory_step: 5`，`time_step: 3`。
 
-### 4. 发导航目标
+### 4. 打开 map_viz_tool 在线可视化
+
+如果不想用 RViz，也可以打开项目自带的 Matplotlib 窗口。它支持点选目标、请求 Nav2 规划、发送目标，并在 `--online` 模式下显示实时机器人位置、朝向、实际轨迹和速度面板。
+
+```bash
+# 红方地图 + 在线 ROS 2 数据
+ros2 run nav2_pose_navigator map_viz_tool --team red --online
+
+# 蓝方地图 + 在线 ROS 2 数据
+ros2 run nav2_pose_navigator map_viz_tool --team blue --online
+
+# 自定义地图
+ros2 run nav2_pose_navigator map_viz_tool --map /path/to/custom.yaml --online
+```
+
+右侧面板显示：
+- `pose/yaw`：来自 `/odin1/relocation`
+- `raw /cmd_vel`：Nav2 原始速度
+- `adj /cmd_vel_adjusted`：坡面管理后的速度
+- `final /t0x0111`：最终发给底盘的 `[vx, vy, wz]`
+- `Nav2 plan/trail/costmap`：路径点数、实际轨迹点数、costmap 状态
+
+地图颜色：
+- cyan：Nav2 规划路径 `/plan`
+- orange：机器人实际运动轨迹
+- red：机器人朝向
+- blue：调整后速度方向
+
+> `map_viz_tool` 也是 GUI 程序，同样需要桌面、VNC 或 X11 转发；普通无显示 SSH 里不能直接打开。
+
+### 5. 发导航目标
 
 ```bash
 # 一键发送 (x, y, yaw°) — 不需要手写四元数
@@ -193,7 +223,7 @@ ros2 run nav2_pose_navigator nav2_goal 7.0 2.0 90 --timeout 30
 
 > 底层等价于 `ros2 action send_goal /go_to_pose ...`，但自动做 yaw→四元数转换，显示实时反馈和最终结果。
 
-### 5. Python 调用
+### 6. Python 调用
 
 ```python
 from nav2_pose_navigator_interfaces.action import GoToPose

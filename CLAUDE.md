@@ -169,6 +169,10 @@ rviz2 -d install/nav2_pose_navigator/share/nav2_pose_navigator/rviz/mppi_nav2_vi
 # 如果 SSH 里报 "qt.qpa.xcb: could not connect to display"
 # 说明当前终端没有图形显示环境；Radxa 只跑 bringup，在有桌面的电脑/VNC/X11 转发里打开 rviz2。
 
+# 打开 map_viz_tool 在线可视化（Matplotlib GUI）
+# 显示地图、Nav2路径、costmap、机器人位置/朝向、实际轨迹、/cmd_vel 和 /t0x0111_action 速度面板
+ros2 run nav2_pose_navigator map_viz_tool --team red --online
+
 # 发目标
 ros2 action send_goal /go_to_pose nav2_pose_navigator_interfaces/action/GoToPose \
   "{target_pose: {header: {frame_id: map}, \
