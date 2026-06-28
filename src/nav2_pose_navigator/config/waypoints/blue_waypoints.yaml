@@ -54,7 +54,7 @@ waypoints:
   # 距离斜坡 0.25m，调整姿态对准坡道
   pre_ramp:
     description: "上坡前准备点 — 距斜坡(X=8.9)前 0.25m，对准坡道正面"
-    yaw: 0.0  # 正对上坡方向，ramp_zone_manager 进坡后自动锁 yaw=0
+    yaw: 0.0  # 正对上坡方向；ramp_zone_manager 进坡后默认只抬升底盘
     points:
       - {x: 8.65, y: 3.85}
 

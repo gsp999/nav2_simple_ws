@@ -1,15 +1,15 @@
-"""监测位置，坡面升悬挂+锁yaw=0+最低速，yaw 覆盖控制
+"""监测位置，坡面抬升悬挂 + 可选速度/yaw 兜底控制
 
 进入坡面时自动:
   1. 升起悬挂 (suspension_ramp)
-  2. 锁 yaw=0 (正面朝坡，+X 方向)，P 控制器覆盖 wz
-  3. 强制最低速 (min_ramp_speed)
-  4. 减速模式 (/targetstate=-1)
+  2. 可选锁 yaw=0 (正面朝坡，+X 方向)
+  3. 可选强制坡面最低速 (min_ramp_speed)
+  4. 可选发布减速模式 (/targetstate=-1)
 
 出坡面时恢复:
   1. 降悬挂 (suspension_flat)
-  2. 释放 yaw 锁 → Nav2 恢复旋转控制（到目标朝向）
-  3. 减速模式 (/targetstate=-1)
+  2. 如果启用了坡面 yaw 锁，则释放 yaw 锁
+  3. 可选发布减速模式 (/targetstate=-1)
 
 外部 yaw 覆盖:
   - /desired_yaw (Float32): 设置期望朝向(rad)，发 999.0 解除
@@ -44,10 +44,16 @@ class RampZoneManager(Node):
         self.declare_parameter("suspension_flat", 30.0)
         self.declare_parameter("yaw_kp", 2.0)
         self.declare_parameter("yaw_max_vel", 2.0)
+        self.declare_parameter("enable_ramp_yaw_lock", False)
+        self.declare_parameter("enable_ramp_speed_floor", False)
+        self.declare_parameter("publish_ramp_target_state", False)
         self.declare_parameter("enable_cruise_speed_floor", True)
-        self.declare_parameter("min_cruise_speed", 2.00)
-        self.declare_parameter("cruise_slowdown_distance", 1.0)
+        self.declare_parameter("min_cruise_speed", 1.50)
+        self.declare_parameter("enable_cruise_angular_floor", True)
+        self.declare_parameter("min_cruise_angular_speed", 0.45)
+        self.declare_parameter("cruise_slowdown_distance", 0.25)
         self.declare_parameter("cruise_command_epsilon", 0.02)
+        self.declare_parameter("cruise_angular_epsilon", 0.03)
 
         self.team = self.get_parameter("team").value
         self.ramp_x_min = self.get_parameter("ramp_x_min").value
@@ -57,14 +63,26 @@ class RampZoneManager(Node):
         self.suspension_flat = self.get_parameter("suspension_flat").value
         self.yaw_kp = self.get_parameter("yaw_kp").value
         self.yaw_max_vel = self.get_parameter("yaw_max_vel").value
+        self.enable_ramp_yaw_lock = bool(
+            self.get_parameter("enable_ramp_yaw_lock").value)
+        self.enable_ramp_speed_floor = bool(
+            self.get_parameter("enable_ramp_speed_floor").value)
+        self.publish_ramp_target_state = bool(
+            self.get_parameter("publish_ramp_target_state").value)
         self.enable_cruise_speed_floor = bool(
             self.get_parameter("enable_cruise_speed_floor").value)
         self.min_cruise_speed = float(
             self.get_parameter("min_cruise_speed").value)
+        self.enable_cruise_angular_floor = bool(
+            self.get_parameter("enable_cruise_angular_floor").value)
+        self.min_cruise_angular_speed = float(
+            self.get_parameter("min_cruise_angular_speed").value)
         self.cruise_slowdown_distance = float(
             self.get_parameter("cruise_slowdown_distance").value)
         self.cruise_command_epsilon = float(
             self.get_parameter("cruise_command_epsilon").value)
+        self.cruise_angular_epsilon = float(
+            self.get_parameter("cruise_angular_epsilon").value)
 
         if self.team == "blue":
             self.ramp_y_min, self.ramp_y_max = 3.1, 4.6
@@ -101,7 +119,11 @@ class RampZoneManager(Node):
             f"RampZoneManager [{self.team}]: yaw_kp={self.yaw_kp}, "
             f"ramp y=[{self.ramp_y_min},{self.ramp_y_max}], "
             f"cruise_floor={self.enable_cruise_speed_floor}, "
-            f"min_cruise={self.min_cruise_speed:.2f}m/s")
+            f"min_cruise={self.min_cruise_speed:.2f}m/s, "
+            f"angular_floor={self.enable_cruise_angular_floor}, "
+            f"min_wz={self.min_cruise_angular_speed:.2f}rad/s, "
+            f"ramp_yaw_lock={self.enable_ramp_yaw_lock}, "
+            f"ramp_speed_floor={self.enable_ramp_speed_floor}")
 
     def nav_active_cb(self, msg: Bool):
         self.navigation_active = bool(msg.data)
@@ -133,21 +155,25 @@ class RampZoneManager(Node):
             self.ramp_y_min <= self.current_y <= self.ramp_y_max
         )
         if self.in_ramp and not was_in_ramp:
-            self.get_logger().info("Enter ramp -> raise suspension + lock yaw=0 (face ramp)")
+            self.get_logger().info("Enter ramp -> raise suspension")
             h = self.suspension_ramp
             self.suspension_pub.publish(Float32MultiArray(data=[h, h, h, h]))
-            self.target_state_pub.publish(Int32(data=-1))
-            # Lock yaw to 0 (straight up +X), face the ramp head-on
-            self.desired_yaw = 0.0
-            self.get_logger().info("Yaw locked to 0° (face ramp)")
+            if self.publish_ramp_target_state:
+                self.target_state_pub.publish(Int32(data=-1))
+            if self.enable_ramp_yaw_lock:
+                # Lock yaw to 0 (straight up +X), face the ramp head-on
+                self.desired_yaw = 0.0
+                self.get_logger().info("Yaw locked to 0° (face ramp)")
         elif not self.in_ramp and was_in_ramp:
-            self.get_logger().info("Exit ramp -> lower suspension + unlock yaw")
+            self.get_logger().info("Exit ramp -> lower suspension")
             h = self.suspension_flat
             self.suspension_pub.publish(Float32MultiArray(data=[h, h, h, h]))
-            self.target_state_pub.publish(Int32(data=-1))
-            # Release yaw — Nav2 resumes orientation control (rotate to goal)
-            self.desired_yaw = None
-            self.get_logger().info("Yaw unlocked (Nav2 resumes rotation)")
+            if self.publish_ramp_target_state:
+                self.target_state_pub.publish(Int32(data=-1))
+            if self.enable_ramp_yaw_lock:
+                # Release yaw — Nav2 resumes orientation control (rotate to goal)
+                self.desired_yaw = None
+                self.get_logger().info("Yaw unlocked (Nav2 resumes rotation)")
 
     def cmd_cb(self, msg: Twist):
         out = Twist()
@@ -162,27 +188,41 @@ class RampZoneManager(Node):
             wz = max(-self.yaw_max_vel, min(self.yaw_max_vel, wz))
             out.angular.z = wz
 
-        # Ramp 最低速
-        if self.in_ramp:
+        # Ramp 最低速（默认关闭：坡面只抬底盘，线速度交给巡航兜底/Nav2）
+        if self.in_ramp and self.enable_ramp_speed_floor:
             speed = math.sqrt(out.linear.x**2 + out.linear.y**2)
             if 0.01 < speed < self.min_ramp_speed:
                 scale = self.min_ramp_speed / speed
                 out.linear.x *= scale
                 out.linear.y *= scale
-        elif self._should_apply_cruise_floor():
+        elif self._should_apply_linear_floor():
             speed = math.sqrt(out.linear.x**2 + out.linear.y**2)
             if self.cruise_command_epsilon < speed < self.min_cruise_speed:
                 scale = self.min_cruise_speed / speed
                 out.linear.x *= scale
                 out.linear.y *= scale
 
+        # 角速度兜底不能按距离关闭：Nav2 通常接近目标后才开始调整最终朝向。
+        if self._should_apply_angular_floor():
+            wz = abs(out.angular.z)
+            if self.cruise_angular_epsilon < wz < self.min_cruise_angular_speed:
+                out.angular.z = math.copysign(
+                    self.min_cruise_angular_speed, out.angular.z)
+
         self.cmd_pub.publish(out)
 
-    def _should_apply_cruise_floor(self) -> bool:
+    def _should_apply_linear_floor(self) -> bool:
         return (
             self.enable_cruise_speed_floor and
             self.navigation_active and
             self.distance_remaining > self.cruise_slowdown_distance
+        )
+
+    def _should_apply_angular_floor(self) -> bool:
+        return (
+            self.enable_cruise_angular_floor and
+            self.navigation_active and
+            self.desired_yaw is None
         )
 
 
