@@ -131,6 +131,24 @@ ros2 launch nav2_pose_navigator bringup.launch.py map:=/path/to/custom.yaml
 ros2 launch nav2_pose_navigator bringup.launch.py team:=red enable_rviz_viz:=false
 ```
 
+启动时不需要再手动一个个节点拉起。`bringup.launch.py` 会同时启动 Nav2 相关进程，然后用自定义 `lifecycle_bringup` 自动完成 `configure -> activate`。
+
+当前采用快速启动策略：
+- launch 后约 `1s` 开始生命周期管理，不再固定等待 `8s`。
+- `lifecycle_bringup` 会轮询每个节点的 `/change_state` 服务，服务出现后立刻进入下一步。
+- `configure` / `activate` 仍然按顺序执行，并带重试，避免 Radxa 上 DDS 或 Nav2 节点启动稍慢时偶发失败。
+
+如果机器状态很差、偶尔还是启动失败，优先看终端里哪个节点没有 `activated OK`。需要保守一点时，改 [bringup.launch.py](src/nav2_pose_navigator/launch/bringup.launch.py) 里的这些值：
+
+```python
+period=1.0                 # lifecycle_bringup 多久后开始
+sleep_configure=0.2         # 每个 configure 后的短暂停顿
+sleep_activate=0.2          # 每个 activate 后的短暂停顿
+service_timeout=30.0        # 最长等生命周期服务出现多久
+transition_timeout=12.0     # 单次 configure/activate 最长等待
+transition_retries=2        # transition 失败后的重试次数
+```
+
 ### 3. 打开 RViz 可视化
 
 ```bash

@@ -113,7 +113,7 @@ def generate_launch_description():
     )
 
     lifecycle_bringup = TimerAction(
-        period=8.0,
+        period=1.0,
         actions=[
             Node(
                 package="nav2_pose_navigator",
@@ -129,9 +129,13 @@ def generate_launch_description():
                         "waypoint_follower",
                         "bt_navigator",
                     ],
-                    "sleep_configure": 2.0,
-                    "sleep_activate": 1.0,
+                    "sleep_configure": 0.2,
+                    "sleep_activate": 0.2,
                     "service_timeout": 30.0,
+                    "service_poll_period": 0.25,
+                    "transition_timeout": 12.0,
+                    "transition_retries": 2,
+                    "retry_delay": 0.5,
                 }],
             )
         ],

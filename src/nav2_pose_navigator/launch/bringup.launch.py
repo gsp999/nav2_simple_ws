@@ -115,11 +115,10 @@ def generate_launch_description():
     # On ARM boards (Radxa Airbox Q900) the DDS layer can't keep up with
     # lifecycle_manager's rapid-fire configure → get_state → activate cycle
     # and times out server-side (rmw_response.cpp:153).
-    # This node calls change_state directly with generous inter-step sleeps.
-    # 8s delay gives costmap nodes (inside planner/controller_server) time
-    # to finish constructing before we start looking for their services.
+    # This node calls change_state directly with retries. It starts early and
+    # polls for lifecycle services, so fast boots don't pay a fixed long delay.
     lifecycle_bringup = TimerAction(
-        period=8.0,
+        period=1.0,
         actions=[
             Node(
                 package="nav2_pose_navigator",
@@ -128,9 +127,13 @@ def generate_launch_description():
                 output="screen",
                 parameters=[{
                     "node_names": _LIFECYCLE_NODES,
-                    "sleep_configure": 2.0,
-                    "sleep_activate": 1.0,
+                    "sleep_configure": 0.2,
+                    "sleep_activate": 0.2,
                     "service_timeout": 30.0,
+                    "service_poll_period": 0.25,
+                    "transition_timeout": 12.0,
+                    "transition_retries": 2,
+                    "retry_delay": 0.5,
                 }],
             )
         ],
