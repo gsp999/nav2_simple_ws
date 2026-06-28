@@ -1,12 +1,12 @@
-"""Launch everything needed for GoToPose navigation.
+"""Launch a local closed-loop Nav2 + MPPI simulation.
 
-Usage:
-    ros2 launch nav2_pose_navigator bringup.launch.py team:=red
-    ros2 launch nav2_pose_navigator bringup.launch.py team:=blue
-    ros2 launch nav2_pose_navigator bringup.launch.py map:=/path/to/custom.yaml
+This uses the real Nav2 stack and a lightweight fake robot:
+  Nav2 /cmd_vel -> ramp_zone_manager -> /cmd_vel_adjusted
+                -> fake robot pose/odom + cmd_vel_bridge -> /t0x0111_action
 """
 
 import os
+
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction, TimerAction
@@ -16,7 +16,6 @@ from launch_ros.actions import Node
 
 
 def _resolve_map(context, pkg_dir):
-    """Pick map YAML: custom --map path takes priority, else field_{team}.yaml."""
     map_override = LaunchConfiguration("map").perform(context)
     if map_override:
         return map_override
@@ -26,24 +25,29 @@ def _resolve_map(context, pkg_dir):
 
 def generate_launch_description():
     pkg_dir = get_package_share_directory("nav2_pose_navigator")
-
-    team_arg = DeclareLaunchArgument(
-        "team", default_value="red",
-        description="Team color: red or blue",
-    )
-    map_arg = DeclareLaunchArgument(
-        "map", default_value="",
-        description="Custom map YAML path (overrides team)",
-    )
-    enable_rviz_viz_arg = DeclareLaunchArgument(
-        "enable_rviz_viz",
-        default_value="true",
-        description="Start RViz Marker/Path visualization helper",
-    )
-
     nav2_params = os.path.join(pkg_dir, "config", "nav2_params.yaml")
+    rviz_config = os.path.join(
+        pkg_dir, "rviz", "mppi_nav2_visualization.rviz")
 
-    # Static nodes — no conditional logic
+    team_arg = DeclareLaunchArgument("team", default_value="red")
+    map_arg = DeclareLaunchArgument(
+        "map",
+        default_value="",
+        description="Custom map YAML path, overrides team",
+    )
+    start_rviz_arg = DeclareLaunchArgument(
+        "start_rviz",
+        default_value="false",
+        description="Open RViz with the included MPPI visualization config",
+    )
+    initial_x_arg = DeclareLaunchArgument("initial_x", default_value="0.0")
+    initial_y_arg = DeclareLaunchArgument(
+        "initial_y",
+        default_value="0.0",
+        description="Initial Y in map/nav_map world coordinates",
+    )
+    initial_yaw_arg = DeclareLaunchArgument("initial_yaw", default_value="0.0")
+
     odom_to_tf = Node(
         package="nav2_pose_navigator",
         executable="odom_to_tf_node",
@@ -69,55 +73,45 @@ def generate_launch_description():
     )
 
     controller_server = Node(
-        package="nav2_controller", executable="controller_server",
-        name="controller_server", output="screen",
+        package="nav2_controller",
+        executable="controller_server",
+        name="controller_server",
+        output="screen",
         parameters=[nav2_params],
     )
 
     planner_server = Node(
-        package="nav2_planner", executable="planner_server",
-        name="planner_server", output="screen",
+        package="nav2_planner",
+        executable="planner_server",
+        name="planner_server",
+        output="screen",
         parameters=[nav2_params],
     )
 
     behavior_server = Node(
-        package="nav2_behaviors", executable="behavior_server",
-        name="behavior_server", output="screen",
+        package="nav2_behaviors",
+        executable="behavior_server",
+        name="behavior_server",
+        output="screen",
         parameters=[nav2_params],
     )
 
     waypoint_follower = Node(
-        package="nav2_waypoint_follower", executable="waypoint_follower",
-        name="waypoint_follower", output="screen",
+        package="nav2_waypoint_follower",
+        executable="waypoint_follower",
+        name="waypoint_follower",
+        output="screen",
         parameters=[nav2_params],
     )
 
     bt_navigator = Node(
-        package="nav2_bt_navigator", executable="bt_navigator",
-        name="bt_navigator", output="screen",
+        package="nav2_bt_navigator",
+        executable="bt_navigator",
+        name="bt_navigator",
+        output="screen",
         parameters=[nav2_params],
     )
 
-    # global_costmap / local_costmap are NOT independent lifecycle nodes
-    # in Nav2 Jazzy — they are sub-nodes created internally by
-    # planner_server / controller_server and managed by them.
-    # Only the parent servers need lifecycle transitions.
-    _LIFECYCLE_NODES = [
-        "map_server",
-        "planner_server",
-        "controller_server",
-        "behavior_server",
-        "waypoint_follower",
-        "bt_navigator",
-    ]
-
-    # Custom manual bringup — replaces nav2_lifecycle_manager.
-    # On ARM boards (Radxa Airbox Q900) the DDS layer can't keep up with
-    # lifecycle_manager's rapid-fire configure → get_state → activate cycle
-    # and times out server-side (rmw_response.cpp:153).
-    # This node calls change_state directly with generous inter-step sleeps.
-    # 8s delay gives costmap nodes (inside planner/controller_server) time
-    # to finish constructing before we start looking for their services.
     lifecycle_bringup = TimerAction(
         period=8.0,
         actions=[
@@ -127,7 +121,14 @@ def generate_launch_description():
                 name="lifecycle_bringup",
                 output="screen",
                 parameters=[{
-                    "node_names": _LIFECYCLE_NODES,
+                    "node_names": [
+                        "map_server",
+                        "planner_server",
+                        "controller_server",
+                        "behavior_server",
+                        "waypoint_follower",
+                        "bt_navigator",
+                    ],
                     "sleep_configure": 2.0,
                     "sleep_activate": 1.0,
                     "service_timeout": 30.0,
@@ -136,8 +137,6 @@ def generate_launch_description():
         ],
     )
 
-    # goto_pose_server starts immediately — no need to wait for Nav2.
-    # If a goal arrives before Nav2 is ready, it returns failure gracefully.
     goto_pose_server = Node(
         package="nav2_pose_navigator",
         executable="goto_pose_server",
@@ -151,7 +150,6 @@ def generate_launch_description():
         executable="mppi_rviz_visualizer",
         name="mppi_rviz_visualizer",
         output="screen",
-        condition=IfCondition(LaunchConfiguration("enable_rviz_viz")),
         parameters=[{
             "frame_id": "nav_map",
             "pose_topic": "/odin1/relocation",
@@ -161,7 +159,15 @@ def generate_launch_description():
         }],
     )
 
-    # map_server needs the resolved YAML path, so we build it via OpaqueFunction
+    rviz = Node(
+        package="rviz2",
+        executable="rviz2",
+        name="rviz2",
+        output="screen",
+        condition=IfCondition(LaunchConfiguration("start_rviz")),
+        arguments=["-d", rviz_config],
+    )
+
     def _launch_map_server(context):
         yaml_path = _resolve_map(context, pkg_dir)
         return [
@@ -174,10 +180,29 @@ def generate_launch_description():
             )
         ]
 
+    def _launch_sim_robot(context):
+        return [
+            Node(
+                package="nav2_pose_navigator",
+                executable="nav2_sim_robot",
+                name="nav2_sim_robot",
+                output="screen",
+                parameters=[{
+                    "initial_x": LaunchConfiguration("initial_x"),
+                    "initial_y": LaunchConfiguration("initial_y"),
+                    "initial_yaw": LaunchConfiguration("initial_yaw"),
+                }],
+            )
+        ]
+
     return LaunchDescription([
         team_arg,
         map_arg,
-        enable_rviz_viz_arg,
+        start_rviz_arg,
+        initial_x_arg,
+        initial_y_arg,
+        initial_yaw_arg,
+        OpaqueFunction(function=_launch_sim_robot),
         odom_to_tf,
         ramp_zone_manager,
         cmd_vel_bridge,
@@ -189,5 +214,6 @@ def generate_launch_description():
         lifecycle_bringup,
         goto_pose_server,
         mppi_rviz_visualizer,
+        rviz,
         OpaqueFunction(function=_launch_map_server),
     ])

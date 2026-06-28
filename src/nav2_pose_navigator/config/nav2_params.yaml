@@ -6,7 +6,8 @@ bt_navigator:
     odom_topic: /odin1/odometry_highfreq
     transform_tolerance: 0.2
     bt_loop_duration: 10
-    default_server_timeout: 60
+    # Nav2 behavior-tree action timeouts are milliseconds, not seconds.
+    default_server_timeout: 60000
     navigators: ["navigate_to_pose", "navigate_through_poses"]
     navigate_to_pose:
       plugin: "nav2_bt_navigator::NavigateToPoseNavigator"
@@ -32,44 +33,56 @@ controller_server:
     goal_checker:
       plugin: "nav2_controller::SimpleGoalChecker"
       xy_goal_tolerance: 0.25
-      yaw_goal_tolerance: 0.10
+      yaw_goal_tolerance: 0.20
       stateful: true
 
     FollowPath:
       plugin: "nav2_mppi_controller::MPPIController"
       time_steps: 56
       model_dt: 0.05
-      batch_size: 2000
-      vx_std: 0.70
-      vy_std: 0.70
+      batch_size: 3000
+      vx_std: 0.85
+      vy_std: 0.85
       wz_std: 0.35
-      vx_max: 2.5
+      vx_max: 2.0
       vx_min: -1.0
-      vy_max: 2.5
+      vy_max: 2.0
       wz_max: 1.5
+      ax_max: 3.0
+      ax_min: -3.0
+      ay_max: 3.0
+      ay_min: -3.0
+      az_max: 2.5
       iteration_count: 1
       prune_distance: 1.7
       transform_tolerance: 0.2
-      temperature: 0.6
-      gamma: 0.04
+      temperature: 0.3
+      gamma: 0.015
       motion_model: "Omni"
       visualize: true
+      shift_control_sequence: false
+      retry_attempt_limit: 2
       TrajectoryVisualizer:
         trajectory_step: 5
         time_step: 3
       reset_period: 4.0
       regenerate_noises: true
       critics:
+        - "ConstraintCritic"
         - "ObstaclesCritic"
         - "GoalCritic"
         - "GoalAngleCritic"
         - "PathAlignCritic"
         - "PathFollowCritic"
-        - "VelocityDeadbandCritic"
+        - "TwirlingCritic"
+      ConstraintCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 3.0
       ObstaclesCritic:
         enabled: true
         cost_power: 1
-        repulsion_weight: 0.5
+        repulsion_weight: 0.25
         critical_weight: 8.0
         consider_footprint: false
         collision_cost: 10000.0
@@ -78,32 +91,31 @@ controller_server:
       GoalCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 15.0
-        threshold_to_consider: 1.0
+        cost_weight: 5.0
+        threshold_to_consider: 1.4
       GoalAngleCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 5.0
-        threshold_to_consider: 0.8
+        cost_weight: 3.0
+        threshold_to_consider: 0.5
       PathAlignCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 7.0
+        cost_weight: 14.0
         max_path_occupancy_ratio: 0.05
-        trajectory_point_step: 3
+        trajectory_point_step: 4
         threshold_to_consider: 0.5
         offset_from_furthest: 20
       PathFollowCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 20.0
+        cost_weight: 14.0
         offset_from_furthest: 10
         threshold_to_consider: 2.0
-      VelocityDeadbandCritic:
+      TwirlingCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 20.0
-        deadband_velocities: [0.25, 0.25, 0.10]
+        cost_weight: 6.0
 
 planner_server:
   ros__parameters:

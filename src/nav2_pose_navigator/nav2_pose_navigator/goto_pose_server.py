@@ -11,6 +11,7 @@ from rclpy.task import Future
 from geometry_msgs.msg import PoseStamped
 from nav2_msgs.action import NavigateToPose
 from action_msgs.msg import GoalStatus
+from std_msgs.msg import Bool, Float32
 
 from nav2_pose_navigator_interfaces.action import GoToPose
 
@@ -47,6 +48,10 @@ class GoToPoseServer(Node):
 
         self._current_pose = None
         self._active_nav2_handle = None
+        self.distance_pub = self.create_publisher(
+            Float32, "/go_to_pose/distance_remaining", 10)
+        self.active_pub = self.create_publisher(
+            Bool, "/go_to_pose/active", 10)
         self.pose_sub = self.create_subscription(
             PoseStamped, "/odin1/relocation", self.pose_cb, 10
         )
@@ -83,31 +88,40 @@ class GoToPoseServer(Node):
             goal_handle.abort()
             return GoToPose.Result(success=False, message="Nav2 action server not available")
 
+        self.active_pub.publish(Bool(data=True))
+        final_result = None
         # ── Pre-ramp alignment: if goal is beyond ramp, align first ──
-        if tx >= self.ramp_x_min:
-            self.get_logger().info(
-                "Ramp target detected: final goal is beyond ramp "
-                f"(x={tx:.2f} >= {self.ramp_x_min:.2f}). "
-                "Will align before ramp; chassis will be raised automatically "
-                "when /odin1/relocation enters the ramp zone.")
-            pre_result = await self._navigate_to_pre_ramp(
-                goal_handle, target_pose, tx, ty,
+        try:
+            if tx >= self.ramp_x_min:
+                self.get_logger().info(
+                    "Ramp target detected: final goal is beyond ramp "
+                    f"(x={tx:.2f} >= {self.ramp_x_min:.2f}). "
+                    "Will align before ramp; chassis will be raised automatically "
+                    "when /odin1/relocation enters the ramp zone.")
+                pre_result = await self._navigate_to_pre_ramp(
+                    goal_handle, target_pose, tx, ty,
+                    start_time=start_time, timeout_sec=timeout_sec)
+                if pre_result is not None:
+                    final_result = pre_result  # failed or cancelled
+                    return final_result
+
+            # ── Main navigation to final target ──
+            nav2_goal = NavigateToPose.Goal()
+            nav2_goal.pose = target_pose
+
+            self.get_logger().info(f"Sending final goal: ({tx:.2f}, {ty:.2f})")
+            result = await self._run_navigate(
+                goal_handle, nav2_goal, target_pose,
                 start_time=start_time, timeout_sec=timeout_sec)
-            if pre_result is not None:
-                return pre_result  # failed or cancelled
-
-        # ── Main navigation to final target ──
-        nav2_goal = NavigateToPose.Goal()
-        nav2_goal.pose = target_pose
-
-        self.get_logger().info(f"Sending final goal: ({tx:.2f}, {ty:.2f})")
-        result = await self._run_navigate(
-            goal_handle, nav2_goal, target_pose,
-            start_time=start_time, timeout_sec=timeout_sec)
-        if result is None:
-            result = GoToPose.Result(success=True, message="Goal reached")
-        self.get_logger().info(result.message)
-        return result
+            if result is None:
+                result = GoToPose.Result(success=True, message="Goal reached")
+            final_result = result
+            self.get_logger().info(result.message)
+            return result
+        finally:
+            self.active_pub.publish(Bool(data=False))
+            if final_result is not None and final_result.success:
+                self.distance_pub.publish(Float32(data=0.0))
 
     async def _navigate_to_pre_ramp(self, goal_handle, target_pose, tx, ty,
                                       start_time=None, timeout_sec=0.0):
@@ -173,6 +187,7 @@ class GoToPoseServer(Node):
                     message=f"Timeout {timeout_sec:.0f}s during {label}")
 
             dist = self._compute_distance(ref_pose)
+            self.distance_pub.publish(Float32(data=float(dist)))
             goal_handle.publish_feedback(
                 GoToPose.Feedback(distance_remaining=dist))
             await self._sleep(0.1)

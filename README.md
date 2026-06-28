@@ -178,37 +178,7 @@ RViz 固定坐标系为 `nav_map`，默认显示：
 
 > MPPI 可视化已在 `nav2_params.yaml` 中启用：`FollowPath.visualize: true`，`TrajectoryVisualizer.trajectory_step: 5`，`time_step: 3`。
 
-### 4. 打开 map_viz_tool 在线可视化
-
-如果不想用 RViz，也可以打开项目自带的 Matplotlib 窗口。它支持点选目标、请求 Nav2 规划、发送目标，并在 `--online` 模式下显示实时机器人位置、朝向、实际轨迹和速度面板。
-
-```bash
-# 红方地图 + 在线 ROS 2 数据
-ros2 run nav2_pose_navigator map_viz_tool --team red --online
-
-# 蓝方地图 + 在线 ROS 2 数据
-ros2 run nav2_pose_navigator map_viz_tool --team blue --online
-
-# 自定义地图
-ros2 run nav2_pose_navigator map_viz_tool --map /path/to/custom.yaml --online
-```
-
-右侧面板显示：
-- `pose/yaw`：来自 `/odin1/relocation`
-- `raw /cmd_vel`：Nav2 原始速度
-- `adj /cmd_vel_adjusted`：坡面管理后的速度
-- `final /t0x0111`：最终发给底盘的 `[vx, vy, wz]`
-- `Nav2 plan/trail/costmap`：路径点数、实际轨迹点数、costmap 状态
-
-地图颜色：
-- cyan：Nav2 规划路径 `/plan`
-- orange：机器人实际运动轨迹
-- red：机器人朝向
-- blue：调整后速度方向
-
-> `map_viz_tool` 也是 GUI 程序，同样需要桌面、VNC 或 X11 转发；普通无显示 SSH 里不能直接打开。
-
-### 5. 发导航目标
+### 4. 发导航目标
 
 ```bash
 # 一键发送 (x, y, yaw°) — 不需要手写四元数
@@ -223,7 +193,7 @@ ros2 run nav2_pose_navigator nav2_goal 7.0 2.0 90 --timeout 30
 
 > 底层等价于 `ros2 action send_goal /go_to_pose ...`，但自动做 yaw→四元数转换，显示实时反馈和最终结果。
 
-### 6. Python 调用
+### 5. Python 调用
 
 ```python
 from nav2_pose_navigator_interfaces.action import GoToPose
@@ -241,6 +211,167 @@ goal.target_pose.pose.orientation.z = math.sin(yaw / 2.0)
 goal.target_pose.pose.orientation.w = math.cos(yaw / 2.0)
 client.send_goal_async(goal)
 ```
+
+---
+
+## 本地仿真
+
+### Nav2 + MPPI 闭环仿真
+
+这个模式用于没有真实底盘时，在本机完整拉起 Nav2、MPPI 和本包写好的 RViz 可视化。它会启动一个假机器人节点，订阅 Nav2 输出的速度，积分出机器人位姿，再把位姿和里程计发布回 Nav2。
+
+```
+fake robot pose/odom
+        ▲
+        │
+Nav2 MPPI /cmd_vel → ramp_zone_manager → /cmd_vel_adjusted
+        │                                ├── nav2_sim_robot 积分运动
+        │                                └── cmd_vel_bridge → /t0x0111_action
+        └── /plan /trajectories /optimal_trajectory → RViz
+```
+
+### 1. 退出 Conda，进入 ROS 环境
+
+不要在 `(base)` Conda 环境里编译或运行 ROS 2。Jazzy 使用系统 Python 3.12，Conda 的 Python 会把自定义 Action 编到错误目录。
+
+```bash
+conda deactivate
+cd ~/nav2_simple_ws
+source /opt/ros/jazzy/setup.bash
+```
+
+确认命令行前面没有 `(base)` 后继续。
+
+### 2. 清理旧构建产物
+
+如果之前在 Conda 里 build 过，先清掉这两个包的旧产物：
+
+```bash
+rm -rf build/nav2_pose_navigator_interfaces install/nav2_pose_navigator_interfaces
+rm -rf build/nav2_pose_navigator install/nav2_pose_navigator log
+```
+
+### 3. 用系统 Python 编译
+
+```bash
+/usr/bin/colcon build --packages-select nav2_pose_navigator_interfaces nav2_pose_navigator \
+  --cmake-args -DPython3_EXECUTABLE=/usr/bin/python3 -DPYTHON_EXECUTABLE=/usr/bin/python3
+
+source install/setup.bash
+```
+
+### 4. 启动仿真
+
+红方：
+
+```bash
+ros2 launch nav2_pose_navigator nav2_sim.launch.py team:=red
+```
+
+蓝方：
+
+```bash
+ros2 launch nav2_pose_navigator nav2_sim.launch.py team:=blue
+```
+
+`nav2_sim.launch.py` 默认初始位姿是 `x=0, y=0, yaw=0`。这里的 `x/y` 是 `map/nav_map` 世界坐标，也就是你定义的 Odin 起点坐标，不是 PGM 像素坐标。
+
+地图 YAML 的 `origin` 是 PGM 左下角相对这个起点坐标的位置：
+- 红方 `field_red.yaml`: `origin=[-0.4, -4.6, 0]`
+- 蓝方 `field_blue.yaml`: `origin=[-0.4, -1.4, 0]`
+
+所以 `(0,0)` 会自动落在对应队伍地图覆盖范围内，不需要给蓝方额外写 `initial_y`。
+
+如果需要手动覆盖初始位置：
+
+```bash
+ros2 launch nav2_pose_navigator nav2_sim.launch.py team:=red initial_x:=0.0 initial_y:=0.0 initial_yaw:=0.0
+```
+
+等待终端里出现：
+
+```text
+controller_server activated OK
+bt_navigator activated OK
+```
+
+默认不会自动打开 RViz，这样 Nav2 和仿真先启动稳定，RViz 后面单独开。
+
+### 5. 发送目标
+
+另开一个终端：
+
+```bash
+conda deactivate
+cd ~/nav2_simple_ws
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+
+ros2 run nav2_pose_navigator nav2_goal 7.0 -3.6 0
+```
+
+蓝方目标示例：
+
+```bash
+ros2 run nav2_pose_navigator nav2_goal 7.0 3.6 0
+```
+
+### 6. 打开 RViz
+
+等目标已经发送、Nav2 开始规划和控制后，再开第三个终端打开 RViz：
+
+```bash
+conda deactivate
+cd ~/nav2_simple_ws
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+
+rviz2 -d install/nav2_pose_navigator/share/nav2_pose_navigator/rviz/mppi_nav2_visualization.rviz
+```
+
+### 7. 在 RViz 里看什么
+
+RViz 中可以看到：
+- `/plan`：全局规划路径
+- `/trajectories`：MPPI 采样轨迹
+- `/optimal_trajectory`：MPPI 当前最优轨迹
+- `/transformed_global_plan`：MPPI 局部跟踪路径
+- `/viz/robot_markers`、`/viz/robot_trail`、`/viz/global_plan`：本包自带可视化
+- `/cmd_vel`、`/cmd_vel_adjusted`、`/t0x0111_action`：最终速度链路输出
+
+### 8. 常见问题
+
+如果启动时出现类似下面的错误：
+
+```text
+symbol lookup error: ... libnav2_msgs__rosidl_typesupport_fastrtps_cpp.so:
+undefined symbol: eprosima::fastcdr::Cdr::serialize(unsigned int)
+```
+
+或者：
+
+```text
+eprosima::fastcdr::exception::BadParamException
+what(): This member is not been selected
+```
+
+这是本机 ROS Jazzy 的 FastDDS/FastCDR/RMW/Nav2 二进制包版本不匹配。需要把 FastDDS/RMW/type support/Nav2 相关包一起更新：
+
+```bash
+sudo apt update
+sudo apt install --only-upgrade \
+  ros-jazzy-fastcdr \
+  ros-jazzy-fastrtps \
+  ros-jazzy-rmw-fastrtps-cpp \
+  ros-jazzy-rmw-fastrtps-shared-cpp \
+  ros-jazzy-rosidl-typesupport-fastrtps-c \
+  ros-jazzy-rosidl-typesupport-fastrtps-cpp \
+  ros-jazzy-nav2-msgs \
+  ros-jazzy-nav2-controller \
+  ros-jazzy-nav2-mppi-controller
+```
+
+升级后重新开一个终端，再重新 source 和启动仿真。
 
 ---
 
@@ -268,6 +399,28 @@ client.send_goal_async(goal)
 | `suspension_flat` | `30.0` | 平地悬挂高度 (mm) |
 | `yaw_kp` | `2.0` | 朝向锁定 P 控制器比例增益 |
 | `yaw_max_vel` | `2.0` | 朝向锁定最大角速度 (rad/s) |
+| `enable_cruise_speed_floor` | `true` | 是否启用非坡面巡航速度兜底 |
+| `min_cruise_speed` | `0.60` | 离目标较远时，非零线速度会被放大到的最低巡航速度 (m/s) |
+| `cruise_slowdown_distance` | `1.0` | 距离目标小于该值后关闭巡航兜底，交给 Nav2 慢停 |
+| `cruise_command_epsilon` | `0.02` | 小于该线速度认为接近 0，不强行放大，避免无方向硬推 |
+
+**巡航速度兜底逻辑：**
+
+`goto_pose_server` 在导航期间发布 `/go_to_pose/active` 和 `/go_to_pose/distance_remaining`。`ramp_zone_manager` 收到 `/cmd_vel` 后，如果当前不在坡面、正在执行 GoToPose、距离目标还大于 `cruise_slowdown_distance`，并且 MPPI 给了一个非零但小于 `min_cruise_speed` 的线速度，就保持原方向不变，把速度大小放大到 `min_cruise_speed`。
+
+例子：
+
+```text
+/cmd_vel:          vx=0.03, vy=0.04  speed=0.05
+min_cruise_speed:  0.60
+/cmd_vel_adjusted: vx=0.36, vy=0.48  speed=0.60
+```
+
+不会放大的情况：
+- `/cmd_vel` 线速度小于 `cruise_command_epsilon`，认为没有可靠方向
+- 已进入目标附近，`distance_remaining <= cruise_slowdown_distance`
+- 当前在 ramp 区，此时使用 `min_ramp_speed`
+- 没有通过 `/go_to_pose` 执行导航，`/go_to_pose/active=false`
 
 **根据 team 自动计算的 Y 范围**（硬编码在代码中，见下方"修改坡面 Y 范围"）：
 
@@ -282,11 +435,10 @@ client.send_goal_async(goal)
 
 | 组件 | 插件 | 关键参数 |
 |------|------|----------|
-| 全局规划器 | SMAC Planner 2D | 最大规划时间 2s |
-| 局部控制器 | MPPI Controller | Omni 模型, 56 时间步, 2000 采样/周期 |
-| 最大速度 | — | vx/vy: 1.5 m/s, wz: 3.0 rad/s, vx_min: -1.0（可后退） |
-| 目标容差 | SimpleGoalChecker | xy: 0.25m, yaw: 0.05 rad |
-| 代价地图 | Static + Inflation | 分辨率 0.05m, 机器人半径 0.20m, 膨胀半径 0.40m |
+| 全局规划器 | SMAC Planner 2D | `GridBased`，当前参数以 YAML 为准 |
+| 局部控制器 | MPPI Controller | Omni 模型，当前采样/critic/速度上限以 YAML 为准 |
+| 目标容差 | SimpleGoalChecker | `xy_goal_tolerance` / `yaw_goal_tolerance` 见 YAML |
+| 代价地图 | Static + Inflation | 分辨率、机器人半径、膨胀半径见 YAML |
 | 局部代价地图 | rolling window | 5m × 5m 滚动窗口 |
 
 ### RViz 可视化参数（mppi_rviz_visualizer）
@@ -326,6 +478,7 @@ client.send_goal_async(goal)
    ramp_zone_manager (拦截修改)
          ├── 进坡面 → 升悬挂 + 限最低速
          ├── 监听 /desired_yaw → 锁朝向
+         ├── 非坡面远离目标 → 保持方向，将过小线速度放大到 min_cruise_speed
          └── 输出 /cmd_vel_adjusted (Twist)
          ▼
    cmd_vel_bridge
@@ -348,6 +501,7 @@ client.send_goal_async(goal)
 | 请求 | `target_pose` (PoseStamped, frame_id="map") + `timeout_sec` (float32, 默认0=不限时) |
 | 结果 | `success` (bool) + `message` (string) |
 | 反馈 | `distance_remaining` (float32) — 剩余距离(米) |
+| 辅助话题 | `/go_to_pose/active` (Bool) + `/go_to_pose/distance_remaining` (Float32)，供速度兜底判断使用 |
 
 ### 硬件话题
 
@@ -356,7 +510,9 @@ client.send_goal_async(goal)
 | `/odin1/relocation` | 输入 | PoseStamped | Odin SLAM 定位 |
 | `/odin1/odometry_highfreq` | 输入 | Odometry | 高频里程计 |
 | `/cmd_vel` | Nav2 输出 | Twist | 原始速度 |
-| `/cmd_vel_adjusted` | ramp_zone_manager 输出 | Twist | 调整后速度 |
+| `/cmd_vel_adjusted` | ramp_zone_manager 输出 | Twist | 坡面/yaw/巡航兜底调整后速度 |
+| `/go_to_pose/active` | goto_pose_server 输出 | Bool | 当前是否正在执行 GoToPose |
+| `/go_to_pose/distance_remaining` | goto_pose_server 输出 | Float32 | 当前阶段剩余距离，速度兜底用它判断何时慢停 |
 | `/desired_yaw` | 输入 | Float32 | 期望朝向(rad)，发 >900 或 NaN 取消锁定 |
 | `/plan` | Nav2 输出 | Path | 全局规划路径 |
 | `/trajectories` | MPPI 输出 | MarkerArray | MPPI 采样轨迹（RViz） |
@@ -560,11 +716,13 @@ nav2_pose_navigator/
 │   ├── goto_pose_server.py        # Action 服务器（核心）
 │   ├── ramp_zone_manager.py       # 坡面管理（悬挂 + 限速 + 锁朝向）
 │   ├── odom_to_tf_node.py         # TF 广播（坐标系桥接）
-│   └── cmd_vel_bridge.py          # 速度格式翻译
+│   ├── cmd_vel_bridge.py          # 速度格式翻译
+│   └── nav2_sim_robot.py          # 本地 Nav2 闭环假机器人
 ├── config/
 │   └── nav2_params.yaml           # Nav2 完整参数
 ├── launch/
-│   └── bringup.launch.py          # 一键启动
+│   ├── bringup.launch.py          # 一键启动
+│   └── nav2_sim.launch.py         # 本地 Nav2 + MPPI 闭环仿真
 ├── maps/                          # 地图文件 (.pgm + .yaml)
 ├── package.xml
 ├── setup.py

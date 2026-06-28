@@ -23,10 +23,10 @@ setup(
             "cmd_vel_bridge = nav2_pose_navigator.cmd_vel_bridge:main",
             "goto_pose_server = nav2_pose_navigator.goto_pose_server:main",
             "ramp_zone_manager = nav2_pose_navigator.ramp_zone_manager:main",
-            "map_viz_tool = nav2_pose_navigator.map_viz_tool:main",
             "nav2_goal = nav2_pose_navigator.nav2_goal:main",
             "lifecycle_bringup = nav2_pose_navigator.lifecycle_bringup:main",
             "mppi_rviz_visualizer = nav2_pose_navigator.mppi_rviz_visualizer:main",
+            "nav2_sim_robot = nav2_pose_navigator.nav2_sim_robot:main",
         ],
     },
 )

@@ -20,7 +20,7 @@ import math
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist, PoseStamped
-from std_msgs.msg import Float32MultiArray, Float32, Int32
+from std_msgs.msg import Bool, Float32MultiArray, Float32, Int32
 
 
 def normalize_angle(a):
@@ -44,6 +44,10 @@ class RampZoneManager(Node):
         self.declare_parameter("suspension_flat", 30.0)
         self.declare_parameter("yaw_kp", 2.0)
         self.declare_parameter("yaw_max_vel", 2.0)
+        self.declare_parameter("enable_cruise_speed_floor", True)
+        self.declare_parameter("min_cruise_speed", 2.00)
+        self.declare_parameter("cruise_slowdown_distance", 1.0)
+        self.declare_parameter("cruise_command_epsilon", 0.02)
 
         self.team = self.get_parameter("team").value
         self.ramp_x_min = self.get_parameter("ramp_x_min").value
@@ -53,6 +57,14 @@ class RampZoneManager(Node):
         self.suspension_flat = self.get_parameter("suspension_flat").value
         self.yaw_kp = self.get_parameter("yaw_kp").value
         self.yaw_max_vel = self.get_parameter("yaw_max_vel").value
+        self.enable_cruise_speed_floor = bool(
+            self.get_parameter("enable_cruise_speed_floor").value)
+        self.min_cruise_speed = float(
+            self.get_parameter("min_cruise_speed").value)
+        self.cruise_slowdown_distance = float(
+            self.get_parameter("cruise_slowdown_distance").value)
+        self.cruise_command_epsilon = float(
+            self.get_parameter("cruise_command_epsilon").value)
 
         if self.team == "blue":
             self.ramp_y_min, self.ramp_y_max = 3.1, 4.6
@@ -64,6 +76,8 @@ class RampZoneManager(Node):
         self.current_x = 0.0
         self.current_y = 0.0
         self.desired_yaw = None  # None = 不覆盖，让 Nav2 控制
+        self.navigation_active = False
+        self.distance_remaining = float("inf")
 
         # 订阅
         self.pose_sub = self.create_subscription(
@@ -72,6 +86,10 @@ class RampZoneManager(Node):
             Twist, "/cmd_vel", self.cmd_cb, 10)
         self.yaw_sub = self.create_subscription(
             Float32, "/desired_yaw", self.yaw_target_cb, 10)
+        self.nav_active_sub = self.create_subscription(
+            Bool, "/go_to_pose/active", self.nav_active_cb, 10)
+        self.distance_sub = self.create_subscription(
+            Float32, "/go_to_pose/distance_remaining", self.distance_cb, 10)
 
         # 发布
         self.cmd_pub = self.create_publisher(Twist, "/cmd_vel_adjusted", 10)
@@ -81,7 +99,17 @@ class RampZoneManager(Node):
 
         self.get_logger().info(
             f"RampZoneManager [{self.team}]: yaw_kp={self.yaw_kp}, "
-            f"ramp y=[{self.ramp_y_min},{self.ramp_y_max}]")
+            f"ramp y=[{self.ramp_y_min},{self.ramp_y_max}], "
+            f"cruise_floor={self.enable_cruise_speed_floor}, "
+            f"min_cruise={self.min_cruise_speed:.2f}m/s")
+
+    def nav_active_cb(self, msg: Bool):
+        self.navigation_active = bool(msg.data)
+        if not self.navigation_active:
+            self.distance_remaining = float("inf")
+
+    def distance_cb(self, msg: Float32):
+        self.distance_remaining = float(msg.data)
 
     def yaw_target_cb(self, msg: Float32):
         """设置期望 yaw（rad）。发 NaN 或 >900 禁用覆盖"""
@@ -141,8 +169,21 @@ class RampZoneManager(Node):
                 scale = self.min_ramp_speed / speed
                 out.linear.x *= scale
                 out.linear.y *= scale
+        elif self._should_apply_cruise_floor():
+            speed = math.sqrt(out.linear.x**2 + out.linear.y**2)
+            if self.cruise_command_epsilon < speed < self.min_cruise_speed:
+                scale = self.min_cruise_speed / speed
+                out.linear.x *= scale
+                out.linear.y *= scale
 
         self.cmd_pub.publish(out)
+
+    def _should_apply_cruise_floor(self) -> bool:
+        return (
+            self.enable_cruise_speed_floor and
+            self.navigation_active and
+            self.distance_remaining > self.cruise_slowdown_distance
+        )
 
 
 def main(args=None):
