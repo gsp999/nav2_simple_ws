@@ -85,6 +85,11 @@ class GoToPoseServer(Node):
 
         # ── Pre-ramp alignment: if goal is beyond ramp, align first ──
         if tx >= self.ramp_x_min:
+            self.get_logger().info(
+                "Ramp target detected: final goal is beyond ramp "
+                f"(x={tx:.2f} >= {self.ramp_x_min:.2f}). "
+                "Will align before ramp; chassis will be raised automatically "
+                "when /odin1/relocation enters the ramp zone.")
             pre_result = await self._navigate_to_pre_ramp(
                 goal_handle, target_pose, tx, ty,
                 start_time=start_time, timeout_sec=timeout_sec)
