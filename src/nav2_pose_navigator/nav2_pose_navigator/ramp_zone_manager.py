@@ -51,7 +51,7 @@ class RampZoneManager(Node):
         self.declare_parameter("min_cruise_speed", 1.50)
         self.declare_parameter("enable_cruise_angular_floor", True)
         self.declare_parameter("min_cruise_angular_speed", 0.45)
-        self.declare_parameter("cruise_slowdown_distance", 0.25)
+        self.declare_parameter("cruise_slowdown_distance", 1.0)
         self.declare_parameter("cruise_command_epsilon", 0.02)
         self.declare_parameter("cruise_angular_epsilon", 0.03)
 
@@ -112,7 +112,7 @@ class RampZoneManager(Node):
         # 发布
         self.cmd_pub = self.create_publisher(Twist, "/cmd_vel_adjusted", 10)
         self.suspension_pub = self.create_publisher(
-            Float32MultiArray, "/t0x0102_action", 10)
+            Float32MultiArray, "/t0x0112_action", 10)
         self.target_state_pub = self.create_publisher(Int32, "/targetstate", 10)
 
         self.get_logger().info(

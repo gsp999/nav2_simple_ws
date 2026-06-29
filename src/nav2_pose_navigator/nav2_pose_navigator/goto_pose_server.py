@@ -22,12 +22,15 @@ class GoToPoseServer(Node):
 
         self.declare_parameter("team", "red")
         self.declare_parameter("ramp_x_min", 8.9)
+        self.declare_parameter("enable_pre_ramp_alignment", False)
         self.declare_parameter("pre_ramp_offset", 0.5)
         self.team = self.get_parameter("team").value
         self.ramp_x_min = self.get_parameter("ramp_x_min").value
+        self.enable_pre_ramp_alignment = bool(
+            self.get_parameter("enable_pre_ramp_alignment").value)
         self.pre_ramp_offset = self.get_parameter("pre_ramp_offset").value
 
-        # ramp Y center: align to middle of the ramp before climbing
+        # ramp Y center: used only when optional pre-ramp alignment is enabled.
         if self.team == "blue":
             ramp_y_min, ramp_y_max = 3.1, 4.6
         else:
@@ -59,7 +62,9 @@ class GoToPoseServer(Node):
         self.get_logger().info(
             f"GoToPoseServer ready — waiting for goals on /go_to_pose "
             f"(team={self.team}, ramp_x_min={self.ramp_x_min}, "
-            f"ramp_y_center={self.ramp_y_center:.2f}, pre_ramp_offset={self.pre_ramp_offset})")
+            f"pre_ramp_alignment={self.enable_pre_ramp_alignment}, "
+            f"ramp_y_center={self.ramp_y_center:.2f}, "
+            f"pre_ramp_offset={self.pre_ramp_offset})")
 
     def goal_callback(self, goal_request):
         self.get_logger().info(
@@ -90,9 +95,9 @@ class GoToPoseServer(Node):
 
         self.active_pub.publish(Bool(data=True))
         final_result = None
-        # ── Pre-ramp alignment: if goal is beyond ramp, align first ──
+        # ── Optional pre-ramp alignment: enabled by default for the raised-platform map.
         try:
-            if tx >= self.ramp_x_min:
+            if self.enable_pre_ramp_alignment and tx >= self.ramp_x_min:
                 self.get_logger().info(
                     "Ramp target detected: final goal is beyond ramp "
                     f"(x={tx:.2f} >= {self.ramp_x_min:.2f}). "
@@ -104,6 +109,11 @@ class GoToPoseServer(Node):
                 if pre_result is not None:
                     final_result = pre_result  # failed or cancelled
                     return final_result
+            elif tx >= self.ramp_x_min:
+                self.get_logger().info(
+                    "Ramp target detected, pre-ramp alignment disabled: "
+                    "sending final goal directly. Chassis will be raised "
+                    "when /odin1/relocation enters the ramp zone.")
 
             # ── Main navigation to final target ──
             nav2_goal = NavigateToPose.Goal()
